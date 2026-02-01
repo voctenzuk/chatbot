@@ -1,0 +1,13 @@
+README.md
+pyproject.toml
+src/bot/__init__.py
+src/bot/__main__.py
+src/bot/app.py
+src/bot/config.py
+src/bot/handlers.py
+src/tg_virtual_girlfriend.egg-info/PKG-INFO
+src/tg_virtual_girlfriend.egg-info/SOURCES.txt
+src/tg_virtual_girlfriend.egg-info/dependency_links.txt
+src/tg_virtual_girlfriend.egg-info/entry_points.txt
+src/tg_virtual_girlfriend.egg-info/requires.txt
+src/tg_virtual_girlfriend.egg-info/top_level.txt
