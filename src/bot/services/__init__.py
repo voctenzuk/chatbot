@@ -43,6 +43,29 @@ except ImportError:
     get_context_builder = None  # type: ignore
     set_context_builder = None  # type: ignore
 
+try:
+    from bot.services.summarizer import (
+        Summarizer,
+        SummarizerConfig,
+        SummaryKind,
+        SummaryResult,
+        SummaryJSON,
+        FactCandidate,
+        ArtifactReference,
+        get_summarizer,
+        set_summarizer,
+    )
+except ImportError:
+    Summarizer = None  # type: ignore
+    SummarizerConfig = None  # type: ignore
+    SummaryKind = None  # type: ignore
+    SummaryResult = None  # type: ignore
+    SummaryJSON = None  # type: ignore
+    FactCandidate = None  # type: ignore
+    ArtifactReference = None  # type: ignore
+    get_summarizer = None  # type: ignore
+    set_summarizer = None  # type: ignore
+
 __all__ = [
     # Mem0 Memory Service
     "Mem0MemoryService",
@@ -61,4 +84,14 @@ __all__ = [
     "RunningSummary",
     "get_context_builder",
     "set_context_builder",
+    # Summarizer
+    "Summarizer",
+    "SummarizerConfig",
+    "SummaryKind",
+    "SummaryResult",
+    "SummaryJSON",
+    "FactCandidate",
+    "ArtifactReference",
+    "get_summarizer",
+    "set_summarizer",
 ]
