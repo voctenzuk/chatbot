@@ -614,10 +614,9 @@ class Summarizer:
         if not summary_result.summary_json:
             return []
 
-        threshold = (
-            min_confidence if min_confidence is not None else self.config.min_fact_confidence
-        )
-        return summary_result.summary_json.get_high_confidence_facts(threshold)
+        threshold = self.config.min_fact_confidence if min_confidence is None else min_confidence
+        facts = summary_result.summary_json.get_high_confidence_facts(threshold)
+        return facts[: self.config.max_facts_per_summary]
 
 
 # Global instance for dependency injection
@@ -638,9 +637,19 @@ def get_summarizer(
         Summarizer instance
     """
     global _summarizer
-    if _summarizer is None or config is not None:
+
+    # Determine if we need to create a new instance
+    if _summarizer is None:
         _summarizer = Summarizer(config, llm_provider)
-    return _summarizer
+    elif config is not None:
+        _summarizer = Summarizer(config, llm_provider)
+    elif llm_provider is not None and llm_provider is not _summarizer.llm_provider:
+        _summarizer = Summarizer(config, llm_provider)
+
+    # After the above blocks, _summarizer is guaranteed to be set
+    # Use a local variable to help pyright with type narrowing
+    result: Summarizer = _summarizer
+    return result
 
 
 def set_summarizer(summarizer: Summarizer | None) -> None:
