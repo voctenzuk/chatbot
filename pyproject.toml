@@ -26,6 +26,12 @@ dependencies = [
 
   # Optional: storage
   "redis>=5.0",
+
+  # Database (Supabase)
+  "supabase>=2.0",
+
+  # Math/ML utilities
+  "numpy>=1.26",
 ]
 
 [project.optional-dependencies]
