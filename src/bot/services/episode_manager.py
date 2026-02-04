@@ -95,6 +95,59 @@ class EpisodeManager:
             self._switch_history[user_id] = []
         self._switch_history[user_id].append(datetime.now())
 
+    async def _seed_in_memory_state_from_db(self, user_id: int) -> bool:
+        """Seed in-memory episode manager from database state.
+
+        This prevents unnecessary episode splits after restart when
+        an active episode exists in DB but in-memory state is empty.
+
+        Args:
+            user_id: Telegram user ID
+
+        Returns:
+            True if state was seeded successfully, False otherwise.
+        """
+        if self.db is None:
+            return False
+
+        episode = await self.db.get_active_episode_for_user(user_id)
+        if episode is None:
+            return False
+
+        # Get messages for this episode to seed the in-memory state
+        messages = await self.db.get_messages_for_episode(episode.id, limit=50)
+
+        # Import here to avoid circular imports
+        from bot.services.episode_switcher import Episode as InMemoryEpisode, Message
+
+        # Create in-memory episode
+        in_memory_episode = InMemoryEpisode(
+            episode_id=episode.id,
+            user_id=user_id,
+            start_time=episode.started_at or datetime.now(),
+            end_time=episode.last_user_message_at or episode.started_at or datetime.now(),
+            messages=[
+                Message(
+                    content=m.content_text,
+                    timestamp=m.created_at or datetime.now(),
+                    user_id=user_id,
+                    role=m.role,
+                )
+                for m in messages
+            ],
+        )
+
+        # Seed the in-memory manager
+        self._in_memory_manager._current_episode[user_id] = in_memory_episode
+
+        logger.debug(
+            "Seeded in-memory state for user {} from DB episode {} ({} messages)",
+            user_id,
+            episode.id,
+            len(messages),
+        )
+        return True
+
     async def _evaluate_switch(
         self,
         user_id: int,
@@ -110,6 +163,12 @@ class EpisodeManager:
                 confidence=1.0,
                 trigger_type="rate_limit",
             )
+
+        # Check if we need to seed in-memory state from DB
+        current_in_memory = self._in_memory_manager._current_episode.get(user_id)
+        if current_in_memory is None and self.db:
+            # Try to seed state from DB to prevent unnecessary splits
+            await self._seed_in_memory_state_from_db(user_id)
 
         # Get last message time from database
         if self.db:
@@ -136,6 +195,17 @@ class EpisodeManager:
                             confidence=min(1.0, gap / self.config.time_gap_threshold),
                             trigger_type="time_gap",
                         )
+
+                # We have an active DB episode and no time-gap trigger.
+                # Don't start a new episode just because in-memory state is empty.
+                # The in-memory state has been seeded above, so continue in same episode.
+                if current_in_memory is None or not current_in_memory.messages:
+                    return SwitchDecision(
+                        should_switch=False,
+                        reason="Continuing active DB episode",
+                        confidence=1.0,
+                        trigger_type=None,
+                    )
 
         # Fall back to in-memory evaluation
         return await self._in_memory_manager.evaluate_switch(user_id, content)

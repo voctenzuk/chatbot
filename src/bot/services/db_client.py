@@ -15,6 +15,19 @@ from unittest.mock import MagicMock
 from loguru import logger
 
 
+class DatabaseInitializationError(RuntimeError):
+    """Raised when database client initialization fails.
+
+    This exception indicates that the database is unavailable and
+    message persistence cannot be guaranteed. Handlers should catch
+    this and inform users appropriately.
+    """
+
+    def __init__(self, message: str, cause: Exception | None = None) -> None:
+        super().__init__(message)
+        self.cause = cause
+
+
 # Import supabase client - may not be available in all environments
 try:
     from supabase import Client, create_client
