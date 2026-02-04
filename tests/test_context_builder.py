@@ -2,7 +2,6 @@
 
 import pytest
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch
 
 from bot.services.context_builder import (
     ContextBuilder,
@@ -31,7 +30,7 @@ class TestConversationMessage:
             content="Hello!",
             message_id="msg_1",
         )
-        
+
         assert msg.role == MessageRole.USER
         assert msg.content == "Hello!"
         assert msg.message_id == "msg_1"
@@ -43,7 +42,7 @@ class TestConversationMessage:
             role=MessageRole.ASSISTANT,
             content="Hi there!",
         )
-        
+
         assert msg.role == MessageRole.ASSISTANT
         assert msg.content == "Hi there!"
 
@@ -53,9 +52,9 @@ class TestConversationMessage:
             role=MessageRole.USER,
             content="Test message",
         )
-        
+
         result = msg.to_dict()
-        
+
         assert result == {"role": "user", "content": "Test message"}
 
 
@@ -69,7 +68,7 @@ class TestRunningSummary:
             message_count=50,
             version=2,
         )
-        
+
         assert summary.content == "User likes cats and lives in NY"
         assert summary.message_count == 50
         assert summary.version == 2
@@ -82,7 +81,7 @@ class TestRunningSummary:
             content="Old summary",
             timestamp=old_time,
         )
-        
+
         assert summary.is_stale(max_age_hours=24) is True
 
     def test_is_stale_false(self):
@@ -92,7 +91,7 @@ class TestRunningSummary:
             content="Recent summary",
             timestamp=recent_time,
         )
-        
+
         assert summary.is_stale(max_age_hours=24) is False
 
 
@@ -102,7 +101,7 @@ class TestContextAssemblyConfig:
     def test_default_config(self):
         """Test default configuration values."""
         config = ContextAssemblyConfig()
-        
+
         assert config.max_total_tokens == 4000
         assert config.max_summary_tokens == 500
         assert config.max_recent_messages == 10
@@ -118,7 +117,7 @@ class TestContextAssemblyConfig:
             prune_by="recency",
             min_importance_score=0.5,
         )
-        
+
         assert config.max_total_tokens == 2000
         assert config.max_recent_messages == 5
         assert config.prune_by == "recency"
@@ -130,7 +129,7 @@ class TestContextAssemblyConfig:
             include_categories=[MemoryCategory.SEMANTIC, MemoryCategory.PREFERENCE],
             exclude_types=[MemoryType.IMAGE],
         )
-        
+
         assert config.include_categories == [MemoryCategory.SEMANTIC, MemoryCategory.PREFERENCE]
         assert config.exclude_types == [MemoryType.IMAGE]
 
@@ -141,7 +140,7 @@ class TestContextBuilderInit:
     def test_init_with_default_config(self):
         """Test initialization with default config."""
         builder = ContextBuilder()
-        
+
         assert builder.config is not None
         assert builder.config.max_total_tokens == 4000
 
@@ -149,7 +148,7 @@ class TestContextBuilderInit:
         """Test initialization with custom config."""
         config = ContextAssemblyConfig(max_total_tokens=1000)
         builder = ContextBuilder(config)
-        
+
         assert builder.config.max_total_tokens == 1000
 
 
@@ -159,20 +158,20 @@ class TestTokenEstimation:
     def test_estimate_tokens_basic(self):
         """Test basic token estimation."""
         builder = ContextBuilder()
-        
+
         # 100 chars * 0.25 = 25 tokens
         tokens = builder._estimate_tokens("a" * 100)
-        
+
         assert tokens == 25
 
     def test_estimate_tokens_custom_ratio(self):
         """Test token estimation with custom ratio."""
         config = ContextAssemblyConfig(tokens_per_char=0.5)
         builder = ContextBuilder(config)
-        
+
         # 100 chars * 0.5 = 50 tokens
         tokens = builder._estimate_tokens("a" * 100)
-        
+
         assert tokens == 50
 
 
@@ -212,22 +211,22 @@ class TestMemoryFiltering:
             include_categories=[MemoryCategory.PREFERENCE, MemoryCategory.SEMANTIC]
         )
         builder = ContextBuilder(config)
-        
+
         filtered = builder._filter_memories(sample_memories)
-        
+
         assert len(filtered) == 2
-        assert all(m.memory_category in [MemoryCategory.PREFERENCE, MemoryCategory.SEMANTIC] 
-                   for m in filtered)
+        assert all(
+            m.memory_category in [MemoryCategory.PREFERENCE, MemoryCategory.SEMANTIC]
+            for m in filtered
+        )
 
     def test_filter_by_exclude_category(self, sample_memories):
         """Test filtering by excluded categories."""
-        config = ContextAssemblyConfig(
-            exclude_categories=[MemoryCategory.EMOTIONAL]
-        )
+        config = ContextAssemblyConfig(exclude_categories=[MemoryCategory.EMOTIONAL])
         builder = ContextBuilder(config)
-        
+
         filtered = builder._filter_memories(sample_memories)
-        
+
         assert len(filtered) == 2
         assert all(m.memory_category != MemoryCategory.EMOTIONAL for m in filtered)
 
@@ -235,9 +234,9 @@ class TestMemoryFiltering:
         """Test filtering by minimum importance score."""
         config = ContextAssemblyConfig(min_importance_score=1.3)
         builder = ContextBuilder(config)
-        
+
         filtered = builder._filter_memories(sample_memories)
-        
+
         assert len(filtered) == 1
         assert filtered[0].content == "User likes cats"
 
@@ -274,9 +273,9 @@ class TestMemorySorting:
         """Test sorting by priority (importance)."""
         config = ContextAssemblyConfig(prune_by="priority")
         builder = ContextBuilder(config)
-        
+
         sorted_memories = builder._sort_memories(unsorted_memories)
-        
+
         assert sorted_memories[0].content == "High importance"
         assert sorted_memories[1].content == "Medium importance"
         assert sorted_memories[2].content == "Low importance"
@@ -285,9 +284,9 @@ class TestMemorySorting:
         """Test sorting by recency."""
         config = ContextAssemblyConfig(prune_by="recency")
         builder = ContextBuilder(config)
-        
+
         sorted_memories = builder._sort_memories(unsorted_memories)
-        
+
         # Most recent first
         assert sorted_memories[0].content == "Low importance"
         assert sorted_memories[1].content == "High importance"
@@ -300,12 +299,12 @@ class TestMemorySorting:
             MemoryFact(content="Accessed 5 times", user_id=123, access_count=5),
             MemoryFact(content="Accessed 10 times", user_id=123, access_count=10),
         ]
-        
+
         config = ContextAssemblyConfig(prune_by="relevance")
         builder = ContextBuilder(config)
-        
+
         sorted_memories = builder._sort_memories(memories)
-        
+
         assert sorted_memories[0].content == "Accessed 10 times"
         assert sorted_memories[1].content == "Accessed 5 times"
         assert sorted_memories[2].content == "Never accessed"
@@ -321,9 +320,9 @@ class TestPruneToTokenLimit:
             ContextPart(content="Short", source="test", priority=1, token_estimate=10),
             ContextPart(content="Also short", source="test", priority=1, token_estimate=15),
         ]
-        
+
         pruned = builder._prune_to_token_limit(parts, 100)
-        
+
         assert len(pruned) == 2
 
     def test_prune_exceeds_limit(self):
@@ -334,18 +333,18 @@ class TestPruneToTokenLimit:
             ContextPart(content="Second", source="test", priority=1, token_estimate=30),
             ContextPart(content="Third", source="test", priority=1, token_estimate=30),
         ]
-        
+
         pruned = builder._prune_to_token_limit(parts, 70)
-        
+
         # Should include first two (60 tokens) but not third (would be 90)
         assert len(pruned) == 2
 
     def test_prune_empty_list(self):
         """Test pruning empty list."""
         builder = ContextBuilder()
-        
+
         pruned = builder._prune_to_token_limit([], 100)
-        
+
         assert pruned == []
 
     def test_prune_with_estimation(self):
@@ -357,9 +356,9 @@ class TestPruneToTokenLimit:
             ContextPart(content="b" * 40, source="test", priority=1),  # 10 tokens
             ContextPart(content="c" * 40, source="test", priority=1),  # 10 tokens
         ]
-        
+
         pruned = builder._prune_to_token_limit(parts, 25)
-        
+
         # First two parts = 20 tokens, adding third would be 30
         assert len(pruned) == 2
 
@@ -375,9 +374,9 @@ class TestBuildSummaryPart:
             message_count=100,
             version=3,
         )
-        
+
         part = builder.build_summary_part(summary)
-        
+
         assert part is not None
         assert part.source == "summary"
         assert part.priority == 10
@@ -387,9 +386,9 @@ class TestBuildSummaryPart:
     def test_build_with_none_summary(self):
         """Test building part with None summary."""
         builder = ContextBuilder()
-        
+
         part = builder.build_summary_part(None)
-        
+
         assert part is None
 
     def test_build_truncates_long_summary(self):
@@ -400,9 +399,9 @@ class TestBuildSummaryPart:
         )
         builder = ContextBuilder(config)
         summary = RunningSummary(content="a" * 100)
-        
+
         part = builder.build_summary_part(summary)
-        
+
         assert part is not None
         assert len(part.content) < 100
         assert part.content.endswith("...")
@@ -418,9 +417,9 @@ class TestBuildRecentMessagesPart:
             ConversationMessage(role=MessageRole.USER, content="Hello"),
             ConversationMessage(role=MessageRole.ASSISTANT, content="Hi!"),
         ]
-        
+
         part = builder.build_recent_messages_part(messages)
-        
+
         assert part is not None
         assert part.source == "recent_messages"
         assert "User: Hello" in part.content
@@ -429,9 +428,9 @@ class TestBuildRecentMessagesPart:
     def test_build_with_empty_messages(self):
         """Test building part with empty messages."""
         builder = ContextBuilder()
-        
+
         part = builder.build_recent_messages_part([])
-        
+
         assert part is None
 
     def test_build_respects_max_messages(self):
@@ -443,9 +442,9 @@ class TestBuildRecentMessagesPart:
             ConversationMessage(role=MessageRole.ASSISTANT, content="Second"),
             ConversationMessage(role=MessageRole.USER, content="Third"),
         ]
-        
+
         part = builder.build_recent_messages_part(messages)
-        
+
         assert part is not None
         assert "Second" in part.content
         assert "Third" in part.content
@@ -462,9 +461,9 @@ class TestBuildSemanticMemoryPart:
             MemoryFact(content="User likes Python", user_id=123),
             MemoryFact(content="User works remotely", user_id=123),
         ]
-        
+
         part = builder.build_semantic_memory_part(memories, query="work")
-        
+
         assert part is not None
         assert part.source == "semantic_memory"
         assert "User likes Python" in part.content
@@ -473,16 +472,14 @@ class TestBuildSemanticMemoryPart:
     def test_build_with_empty_memories(self):
         """Test building part with empty memories."""
         builder = ContextBuilder()
-        
+
         part = builder.build_semantic_memory_part([])
-        
+
         assert part is None
 
     def test_build_with_filtered_memories(self):
         """Test that memories are filtered before building."""
-        config = ContextAssemblyConfig(
-            include_categories=[MemoryCategory.PREFERENCE]
-        )
+        config = ContextAssemblyConfig(include_categories=[MemoryCategory.PREFERENCE])
         builder = ContextBuilder(config)
         memories = [
             MemoryFact(
@@ -496,9 +493,9 @@ class TestBuildSemanticMemoryPart:
                 memory_category=MemoryCategory.SEMANTIC,
             ),
         ]
-        
+
         part = builder.build_semantic_memory_part(memories)
-        
+
         assert part is not None
         assert "cats" in part.content
         assert "Google" not in part.content  # Filtered out
@@ -513,9 +510,9 @@ class TestBuildSemanticMemoryPart:
                 importance_score=2.0,
             ),
         ]
-        
+
         part = builder.build_semantic_memory_part(memories)
-        
+
         assert part is not None
         assert "[Important]" in part.content
 
@@ -529,9 +526,9 @@ class TestBuildSemanticMemoryPart:
                 memory_category=MemoryCategory.EMOTIONAL,
             ),
         ]
-        
+
         part = builder.build_semantic_memory_part(memories)
-        
+
         assert part is not None
         assert "[Emotional]" in part.content
 
@@ -542,9 +539,9 @@ class TestAssemble:
     def test_assemble_empty(self):
         """Test assembling with no inputs."""
         builder = ContextBuilder()
-        
+
         result = builder.assemble()
-        
+
         assert result == ""
 
     def test_assemble_with_all_parts(self):
@@ -553,13 +550,13 @@ class TestAssemble:
         summary = RunningSummary(content="Summary here")
         messages = [ConversationMessage(role=MessageRole.USER, content="Hi")]
         memories = [MemoryFact(content="User fact", user_id=123)]
-        
+
         result = builder.assemble(
             summary=summary,
             recent_messages=messages,
             semantic_memories=memories,
         )
-        
+
         assert "Summary here" in result
         assert "User: Hi" in result
         assert "User fact" in result
@@ -571,18 +568,18 @@ class TestAssemble:
         summary = RunningSummary(content="SUMMARY")
         messages = [ConversationMessage(role=MessageRole.USER, content="MESSAGE")]
         memories = [MemoryFact(content="MEMORY", user_id=123)]
-        
+
         result = builder.assemble(
             summary=summary,
             recent_messages=messages,
             semantic_memories=memories,
         )
-        
+
         # Check order: summary, then memory, then message
         summary_pos = result.find("SUMMARY")
         memory_pos = result.find("MEMORY")
         message_pos = result.find("MESSAGE")
-        
+
         assert summary_pos < memory_pos < message_pos
 
     def test_assemble_respects_token_limit(self):
@@ -594,9 +591,9 @@ class TestAssemble:
         builder = ContextBuilder(config)
         summary = RunningSummary(content="a" * 30)  # 30 tokens
         messages = [ConversationMessage(role=MessageRole.USER, content="b" * 30)]
-        
+
         result = builder.assemble(summary=summary, recent_messages=messages)
-        
+
         # Should be truncated to fit within 20 tokens
         assert len(result) <= 20
 
@@ -607,11 +604,11 @@ class TestAssembleForLLM:
     def test_assemble_with_system_prompt(self):
         """Test assembling with system prompt."""
         builder = ContextBuilder()
-        
+
         messages = builder.assemble_for_llm(
             system_prompt="You are a helpful assistant",
         )
-        
+
         assert len(messages) >= 1
         assert messages[0]["role"] == "system"
         assert "helpful assistant" in messages[0]["content"]
@@ -620,9 +617,9 @@ class TestAssembleForLLM:
         """Test that assembled context is included."""
         builder = ContextBuilder()
         summary = RunningSummary(content="User context")
-        
+
         messages = builder.assemble_for_llm(summary=summary)
-        
+
         # Should have system prompt for context
         system_messages = [m for m in messages if m["role"] == "system"]
         assert len(system_messages) >= 1
@@ -635,12 +632,12 @@ class TestAssembleForLLM:
             ConversationMessage(role=MessageRole.USER, content="Hello"),
             ConversationMessage(role=MessageRole.ASSISTANT, content="Hi!"),
         ]
-        
+
         messages = builder.assemble_for_llm(recent_messages=recent)
-        
+
         user_msgs = [m for m in messages if m["role"] == "user"]
         assistant_msgs = [m for m in messages if m["role"] == "assistant"]
-        
+
         assert len(user_msgs) >= 1
         assert len(assistant_msgs) >= 1
 
@@ -651,15 +648,15 @@ class TestAssembleForLLM:
             ConversationMessage(role=MessageRole.USER, content="First"),
             ConversationMessage(role=MessageRole.ASSISTANT, content="Second"),
         ]
-        
+
         messages = builder.assemble_for_llm(
             system_prompt="System",
             recent_messages=recent,
         )
-        
+
         # Filter out system messages
         non_system = [m for m in messages if m["role"] != "system"]
-        
+
         assert non_system[0]["content"] == "First"
         assert non_system[1]["content"] == "Second"
 
@@ -671,7 +668,7 @@ class TestGlobalInstance:
         """Test that get_context_builder creates default instance."""
         set_context_builder(None)  # Reset
         builder = get_context_builder()
-        
+
         assert isinstance(builder, ContextBuilder)
 
     def test_get_context_builder_with_config(self):
@@ -679,14 +676,14 @@ class TestGlobalInstance:
         set_context_builder(None)  # Reset
         config = ContextAssemblyConfig(max_total_tokens=500)
         builder = get_context_builder(config)
-        
+
         assert builder.config.max_total_tokens == 500
 
     def test_set_context_builder(self):
         """Test setting global instance."""
         custom_builder = ContextBuilder(ContextAssemblyConfig(max_total_tokens=999))
         set_context_builder(custom_builder)
-        
+
         retrieved = get_context_builder()
         assert retrieved is custom_builder
         assert retrieved.config.max_total_tokens == 999
