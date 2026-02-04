@@ -729,7 +729,12 @@ class TestBuildArtifactSurrogatesPart:
     @pytest.fixture
     def sample_surrogates(self):
         """Create sample surrogates for testing."""
-        from bot.services.artifact_service import TextSurrogateForContext, ArtifactType, TextSurrogateKind
+        from bot.services.artifact_service import (
+            TextSurrogateForContext,
+            ArtifactType,
+            TextSurrogateKind,
+        )
+
         return [
             TextSurrogateForContext(
                 artifact_id="artifact-1",
@@ -795,7 +800,12 @@ class TestBuildArtifactSurrogatesPart:
 
     def test_build_truncates_long_content(self):
         """Test that long surrogate content is truncated."""
-        from bot.services.artifact_service import TextSurrogateForContext, ArtifactType, TextSurrogateKind
+        from bot.services.artifact_service import (
+            TextSurrogateForContext,
+            ArtifactType,
+            TextSurrogateKind,
+        )
+
         config = ContextAssemblyConfig(
             max_artifact_tokens=50,
             tokens_per_char=1.0,  # Easy calculation
@@ -821,7 +831,12 @@ class TestBuildArtifactSurrogatesPart:
 
     def test_build_prioritizes_surrogates(self):
         """Test that surrogates are included in priority order."""
-        from bot.services.artifact_service import TextSurrogateForContext, ArtifactType, TextSurrogateKind
+        from bot.services.artifact_service import (
+            TextSurrogateForContext,
+            ArtifactType,
+            TextSurrogateKind,
+        )
+
         builder = ContextBuilder()
 
         surrogates = [
@@ -853,7 +868,12 @@ class TestAssembleWithArtifactSurrogates:
 
     def test_assemble_includes_surrogates(self):
         """Test that assemble includes artifact surrogates."""
-        from bot.services.artifact_service import TextSurrogateForContext, ArtifactType, TextSurrogateKind
+        from bot.services.artifact_service import (
+            TextSurrogateForContext,
+            ArtifactType,
+            TextSurrogateKind,
+        )
+
         builder = ContextBuilder()
 
         summary = RunningSummary(content="Summary here")
@@ -878,7 +898,12 @@ class TestAssembleWithArtifactSurrogates:
 
     def test_assemble_order_with_surrogates(self):
         """Test that surrogates appear in correct order."""
-        from bot.services.artifact_service import TextSurrogateForContext, ArtifactType, TextSurrogateKind
+        from bot.services.artifact_service import (
+            TextSurrogateForContext,
+            ArtifactType,
+            TextSurrogateKind,
+        )
+
         config = ContextAssemblyConfig(order=["summary", "artifact_surrogates", "semantic_memory"])
         builder = ContextBuilder(config)
 
@@ -913,7 +938,12 @@ class TestAssembleForLLMWithSurrogates:
 
     def test_assemble_for_llm_includes_surrogates(self):
         """Test that assemble_for_llm includes artifact surrogates."""
-        from bot.services.artifact_service import TextSurrogateForContext, ArtifactType, TextSurrogateKind
+        from bot.services.artifact_service import (
+            TextSurrogateForContext,
+            ArtifactType,
+            TextSurrogateKind,
+        )
+
         builder = ContextBuilder()
 
         summary = RunningSummary(content="Summary")

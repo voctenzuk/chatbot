@@ -105,9 +105,7 @@ class Artifact:
             episode_id=str(row["episode_id"]) if row.get("episode_id") else None,
             message_id=str(row["message_id"]) if row.get("message_id") else None,
             original_filename=row.get("original_filename"),
-            processing_status=ArtifactProcessingStatus(
-                row.get("processing_status", "pending")
-            ),
+            processing_status=ArtifactProcessingStatus(row.get("processing_status", "pending")),
             processing_error=row.get("processing_error"),
             created_at=datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
             if row.get("created_at")
@@ -281,7 +279,8 @@ class ArtifactService:
         if existing:
             logger.info(
                 "Artifact deduplication: reusing existing artifact {} for user {}",
-                existing.id, request.user_id
+                existing.id,
+                request.user_id,
             )
             # Update context references if provided
             if request.thread_id or request.episode_id or request.message_id:
@@ -341,7 +340,10 @@ class ArtifactService:
 
         logger.info(
             "Created artifact {} for user {} (type={}, size={} bytes)",
-            artifact_id, request.user_id, request.type.value, storage_ref.size_bytes
+            artifact_id,
+            request.user_id,
+            request.type.value,
+            storage_ref.size_bytes,
         )
 
         return CreateArtifactResult(
@@ -531,10 +533,7 @@ class ArtifactService:
             updates["message_id"] = message_id
 
         response = (
-            self._db._client.table("artifacts")
-            .update(updates)
-            .eq("id", artifact_id)
-            .execute()
+            self._db._client.table("artifacts").update(updates).eq("id", artifact_id).execute()
         )
 
         return Artifact.from_row(response.data[0])
@@ -586,9 +585,7 @@ class ArtifactService:
         text_id = response.data
 
         # Update artifact processing status
-        await self._update_processing_status(
-            artifact_id, ArtifactProcessingStatus.COMPLETED
-        )
+        await self._update_processing_status(artifact_id, ArtifactProcessingStatus.COMPLETED)
 
         # Retrieve full record
         text_record = await self._get_text_by_id(text_id)
@@ -596,8 +593,7 @@ class ArtifactService:
             raise RuntimeError(f"Failed to retrieve created text surrogate {text_id}")
 
         logger.debug(
-            "Added {} text surrogate to artifact {} (id={})",
-            text_kind.value, artifact_id, text_id
+            "Added {} text surrogate to artifact {} (id={})", text_kind.value, artifact_id, text_id
         )
 
         return text_record
@@ -722,9 +718,7 @@ class ArtifactService:
         """
         try:
             query = (
-                self._db._client.table("artifact_text")
-                .select("*")
-                .eq("artifact_id", artifact_id)
+                self._db._client.table("artifact_text").select("*").eq("artifact_id", artifact_id)
             )
 
             if text_kinds:

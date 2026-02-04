@@ -199,8 +199,7 @@ class LocalStorageBackend(StorageBackend):
             size_bytes = file_path.stat().st_size
 
         logger.debug(
-            "Stored artifact: user={}, artifact={}, size={} bytes",
-            user_id, artifact_id, size_bytes
+            "Stored artifact: user={}, artifact={}, size={} bytes", user_id, artifact_id, size_bytes
         )
 
         return StorageReference(

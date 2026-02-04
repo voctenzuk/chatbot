@@ -423,7 +423,11 @@ class TestArtifactServiceDeduplication:
 
         # Mock get_artifact_by_sha256 RPC
         mock_db._client.rpc.return_value.execute.return_value.data = [
-            {"artifact_id": "existing-uuid", "storage_key": "existing-key", "created_at": "2024-01-01T00:00:00Z"}
+            {
+                "artifact_id": "existing-uuid",
+                "storage_key": "existing-key",
+                "created_at": "2024-01-01T00:00:00Z",
+            }
         ]
 
         # Mock get_artifact_by_id
@@ -513,12 +517,14 @@ class TestArtifactServiceTextSurrogates:
         mock_db._client.rpc.return_value.execute.return_value.data = "text-uuid"
 
         # Mock _get_text_by_id
-        service._get_text_by_id = AsyncMock(return_value=ArtifactText(
-            id="text-uuid",
-            artifact_id="artifact-uuid",
-            text_kind=TextSurrogateKind.VISION_SUMMARY,
-            text_content="A photo of a cat",
-        ))
+        service._get_text_by_id = AsyncMock(
+            return_value=ArtifactText(
+                id="text-uuid",
+                artifact_id="artifact-uuid",
+                text_kind=TextSurrogateKind.VISION_SUMMARY,
+                text_content="A photo of a cat",
+            )
+        )
 
         text = await service.add_vision_summary(
             artifact_id="artifact-uuid",
@@ -535,12 +541,14 @@ class TestArtifactServiceTextSurrogates:
         """Test adding detailed vision description."""
         mock_db._client.rpc.return_value.execute.return_value.data = "text-uuid"
 
-        service._get_text_by_id = AsyncMock(return_value=ArtifactText(
-            id="text-uuid",
-            artifact_id="artifact-uuid",
-            text_kind=TextSurrogateKind.VISION_DETAIL,
-            text_content="Detailed description",
-        ))
+        service._get_text_by_id = AsyncMock(
+            return_value=ArtifactText(
+                id="text-uuid",
+                artifact_id="artifact-uuid",
+                text_kind=TextSurrogateKind.VISION_DETAIL,
+                text_content="Detailed description",
+            )
+        )
 
         text = await service.add_vision_summary(
             artifact_id="artifact-uuid",
@@ -555,14 +563,16 @@ class TestArtifactServiceTextSurrogates:
         """Test adding OCR text."""
         mock_db._client.rpc.return_value.execute.return_value.data = "text-uuid"
 
-        service._get_text_by_id = AsyncMock(return_value=ArtifactText(
-            id="text-uuid",
-            artifact_id="artifact-uuid",
-            text_kind=TextSurrogateKind.OCR_TEXT,
-            text_content="Extracted text",
-            confidence=0.95,
-            model_used="tesseract",
-        ))
+        service._get_text_by_id = AsyncMock(
+            return_value=ArtifactText(
+                id="text-uuid",
+                artifact_id="artifact-uuid",
+                text_kind=TextSurrogateKind.OCR_TEXT,
+                text_content="Extracted text",
+                confidence=0.95,
+                model_used="tesseract",
+            )
+        )
 
         text = await service.add_ocr_text(
             artifact_id="artifact-uuid",
@@ -580,20 +590,22 @@ class TestArtifactServiceTextSurrogates:
         """Test adding document text with summary."""
         mock_db._client.rpc.return_value.execute.return_value.data = "text-uuid"
 
-        service._get_text_by_id = AsyncMock(side_effect=[
-            ArtifactText(
-                id="text-uuid-1",
-                artifact_id="artifact-uuid",
-                text_kind=TextSurrogateKind.EXTRACTED_TEXT,
-                text_content="Full document text",
-            ),
-            ArtifactText(
-                id="text-uuid-2",
-                artifact_id="artifact-uuid",
-                text_kind=TextSurrogateKind.FILE_SUMMARY,
-                text_content="Document summary",
-            ),
-        ])
+        service._get_text_by_id = AsyncMock(
+            side_effect=[
+                ArtifactText(
+                    id="text-uuid-1",
+                    artifact_id="artifact-uuid",
+                    text_kind=TextSurrogateKind.EXTRACTED_TEXT,
+                    text_content="Full document text",
+                ),
+                ArtifactText(
+                    id="text-uuid-2",
+                    artifact_id="artifact-uuid",
+                    text_kind=TextSurrogateKind.FILE_SUMMARY,
+                    text_content="Document summary",
+                ),
+            ]
+        )
 
         texts = await service.add_document_text(
             artifact_id="artifact-uuid",
@@ -610,14 +622,16 @@ class TestArtifactServiceTextSurrogates:
         """Test adding chunked document text."""
         mock_db._client.rpc.return_value.execute.return_value.data = "text-uuid"
 
-        service._get_text_by_id = AsyncMock(return_value=ArtifactText(
-            id="text-uuid",
-            artifact_id="artifact-uuid",
-            text_kind=TextSurrogateKind.TEXT_CHUNK,
-            text_content="Chunk content",
-            chunk_index=0,
-            chunk_total=3,
-        ))
+        service._get_text_by_id = AsyncMock(
+            return_value=ArtifactText(
+                id="text-uuid",
+                artifact_id="artifact-uuid",
+                text_kind=TextSurrogateKind.TEXT_CHUNK,
+                text_content="Chunk content",
+                chunk_index=0,
+                chunk_total=3,
+            )
+        )
 
         texts = await service.add_document_text(
             artifact_id="artifact-uuid",
@@ -709,7 +723,9 @@ class TestGlobalInstance:
 
         # Patch the get functions
         monkeypatch.setattr("bot.services.artifact_service.get_db_client", lambda: mock_db)
-        monkeypatch.setattr("bot.services.artifact_service.get_storage_backend", lambda: mock_storage)
+        monkeypatch.setattr(
+            "bot.services.artifact_service.get_storage_backend", lambda: mock_storage
+        )
 
         service = get_artifact_service()
 

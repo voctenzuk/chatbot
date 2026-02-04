@@ -553,7 +553,9 @@ class ContextBuilder:
             messages.append({"role": "system", "content": system_prompt})
 
         # Assemble context as a system message
-        context = self.assemble(summary, recent_messages, semantic_memories, artifact_surrogates, query)
+        context = self.assemble(
+            summary, recent_messages, semantic_memories, artifact_surrogates, query
+        )
         if context:
             context_header = "Relevant context for this conversation:\n\n"
             messages.append(
