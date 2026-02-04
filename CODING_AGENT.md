@@ -1,5 +1,7 @@
 # Coding agent — minimal workflow
 
+> Coding agents: read this file first and follow it.
+
 ## Request template
 When you ask for code changes, include:
 - Goal
