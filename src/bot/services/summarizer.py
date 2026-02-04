@@ -637,12 +637,19 @@ def get_summarizer(
         Summarizer instance
     """
     global _summarizer
-    if _summarizer is None or config is not None:
+
+    # Determine if we need to create a new instance
+    if _summarizer is None:
+        _summarizer = Summarizer(config, llm_provider)
+    elif config is not None:
         _summarizer = Summarizer(config, llm_provider)
     elif llm_provider is not None and llm_provider is not _summarizer.llm_provider:
         _summarizer = Summarizer(config, llm_provider)
-    assert _summarizer is not None
-    return _summarizer
+
+    # After the above blocks, _summarizer is guaranteed to be set
+    # Use a local variable to help pyright with type narrowing
+    result: Summarizer = _summarizer
+    return result
 
 
 def set_summarizer(summarizer: Summarizer | None) -> None:
