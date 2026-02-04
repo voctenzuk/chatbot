@@ -27,7 +27,7 @@ class EmbeddingProvider(Protocol):
 
 class SimpleEmbeddingProvider:
     """Simple TF-IDF based embedding provider (no external API needed).
-    
+
     This is a fallback embedding provider that uses a simple bag-of-words
     approach with TF-IDF weighting. Good for testing and local development.
     """
@@ -39,9 +39,12 @@ class SimpleEmbeddingProvider:
     def _tokenize(self, text: str) -> list[str]:
         """Simple tokenization (lowercase, split on whitespace/punctuation)."""
         import re
-        return re.findall(r'\b\w+\b', text.lower())
 
-    def _get_tfidf_vector(self, text: str, vocab: dict[str, int], idf: dict[str, float]) -> np.ndarray:
+        return re.findall(r"\b\w+\b", text.lower())
+
+    def _get_tfidf_vector(
+        self, text: str, vocab: dict[str, int], idf: dict[str, float]
+    ) -> np.ndarray:
         """Compute TF-IDF vector for text."""
         tokens = self._tokenize(text)
         if not tokens:
@@ -67,7 +70,7 @@ class SimpleEmbeddingProvider:
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         """Embed texts using TF-IDF.
-        
+
         For a single text or first call, builds vocabulary from all texts.
         For consistency across calls in the same session, vocabulary accumulates.
         """
@@ -120,6 +123,7 @@ class OpenAIEmbeddingProvider:
         if self._client is None:
             try:
                 import openai
+
                 self._client = openai.AsyncOpenAI(
                     api_key=self.api_key,
                     base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
@@ -204,7 +208,7 @@ class SwitchDecision:
 
 class EpisodeManager:
     """Manages conversation episodes with auto-switching logic.
-    
+
     Features:
     - Time-gap trigger: Switch when too much time passes between messages
     - Topic shift detection: Use embedding similarity to detect topic changes
@@ -241,6 +245,7 @@ class EpisodeManager:
     def _cosine_similarity(self, a: list[float], b: list[float]) -> float:
         """Compute cosine similarity between two vectors."""
         import numpy as np
+
         vec_a = np.array(a)
         vec_b = np.array(b)
         norm_a = np.linalg.norm(vec_a)
@@ -256,9 +261,11 @@ class EpisodeManager:
         embeddings = await self.embedding_provider.embed([text])
         return embeddings[0]
 
-    def _check_time_gap(self, last_message_time: datetime, current_time: datetime) -> tuple[bool, float]:
+    def _check_time_gap(
+        self, last_message_time: datetime, current_time: datetime
+    ) -> tuple[bool, float]:
         """Check if time gap exceeds threshold.
-        
+
         Returns:
             (should_trigger, confidence_score)
         """
@@ -279,7 +286,7 @@ class EpisodeManager:
         new_message: Message,
     ) -> tuple[bool, float]:
         """Check if new message represents a topic shift.
-        
+
         Returns:
             (should_trigger, confidence_score)
         """
@@ -320,7 +327,7 @@ class EpisodeManager:
         timestamp: datetime | None = None,
     ) -> SwitchDecision:
         """Evaluate whether to start a new episode.
-        
+
         Args:
             user_id: User identifier
             message_content: Content of the new message
@@ -373,26 +380,28 @@ class EpisodeManager:
             timestamp=current_time,
             user_id=user_id,
         )
-        topic_trigger, topic_confidence = await self._check_topic_shift(current_episode, new_message)
+        topic_trigger, topic_confidence = await self._check_topic_shift(
+            current_episode, new_message
+        )
 
         # Combined decision
         combined_score = (
-            time_confidence * self.config.time_gap_weight +
-            topic_confidence * self.config.topic_shift_weight
+            time_confidence * self.config.time_gap_weight
+            + topic_confidence * self.config.topic_shift_weight
         )
 
         # Decision logic
         if time_trigger and topic_trigger:
             return SwitchDecision(
                 should_switch=True,
-                reason=f"Time gap ({(current_time - last_message.timestamp).total_seconds()/60:.0f}min) and topic shift detected",
+                reason=f"Time gap ({(current_time - last_message.timestamp).total_seconds() / 60:.0f}min) and topic shift detected",
                 confidence=combined_score,
                 trigger_type="combined",
             )
         elif time_trigger and time_confidence > 0.7:
             return SwitchDecision(
                 should_switch=True,
-                reason=f"Significant time gap: {(current_time - last_message.timestamp).total_seconds()/60:.0f} minutes",
+                reason=f"Significant time gap: {(current_time - last_message.timestamp).total_seconds() / 60:.0f} minutes",
                 confidence=time_confidence,
                 trigger_type="time_gap",
             )
@@ -419,7 +428,7 @@ class EpisodeManager:
         timestamp: datetime | None = None,
     ) -> tuple[Message, SwitchDecision]:
         """Add a message and handle episode switching.
-        
+
         Args:
             user_id: User identifier
             content: Message content
@@ -524,7 +533,7 @@ class EpisodeManager:
 
     async def get_episode_summary(self, episode: Episode) -> str:
         """Generate a summary for an episode.
-        
+
         For now, returns a simple text summary. Could be enhanced with LLM.
         """
         if not episode.messages:
@@ -538,33 +547,142 @@ class EpisodeManager:
             all_text = episode.get_combined_text().lower()
             # Filter common stop words (English and Russian)
             stop_words = {
-                'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
-                'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
-                'would', 'could', 'should', 'may', 'might', 'must', 'shall',
-                'can', 'need', 'dare', 'ought', 'used', 'to', 'of', 'in',
-                'for', 'on', 'with', 'at', 'by', 'from', 'as', 'into',
-                'through', 'during', 'before', 'after', 'above', 'below',
-                'between', 'under', 'and', 'but', 'or', 'yet', 'so',
-                'if', 'because', 'although', 'though', 'while', 'where',
-                'when', 'that', 'which', 'who', 'whom', 'whose', 'what',
-                'this', 'these', 'those', 'i', 'you', 'he', 'she', 'it',
-                'we', 'they', 'me', 'him', 'her', 'us', 'them',
-                'my', 'your', 'his', 'its', 'our', 'their',
-                'и', 'в', 'не', 'на', 'я', 'быть', 'он', 'с', 'что',
-                'а', 'по', 'это', 'она', 'к', 'но', 'мы', 'как',
-                'из', 'у', 'то', 'за', 'свой', 'ее', 'который',
-                'весь', 'год', 'от', 'так', 'о', 'для', 'ты', 'же',
-                'все', 'тот', 'мочь', 'вы', 'человек', 'такой',
+                "the",
+                "a",
+                "an",
+                "is",
+                "are",
+                "was",
+                "were",
+                "be",
+                "been",
+                "being",
+                "have",
+                "has",
+                "had",
+                "do",
+                "does",
+                "did",
+                "will",
+                "would",
+                "could",
+                "should",
+                "may",
+                "might",
+                "must",
+                "shall",
+                "can",
+                "need",
+                "dare",
+                "ought",
+                "used",
+                "to",
+                "of",
+                "in",
+                "for",
+                "on",
+                "with",
+                "at",
+                "by",
+                "from",
+                "as",
+                "into",
+                "through",
+                "during",
+                "before",
+                "after",
+                "above",
+                "below",
+                "between",
+                "under",
+                "and",
+                "but",
+                "or",
+                "yet",
+                "so",
+                "if",
+                "because",
+                "although",
+                "though",
+                "while",
+                "where",
+                "when",
+                "that",
+                "which",
+                "who",
+                "whom",
+                "whose",
+                "what",
+                "this",
+                "these",
+                "those",
+                "i",
+                "you",
+                "he",
+                "she",
+                "it",
+                "we",
+                "they",
+                "me",
+                "him",
+                "her",
+                "us",
+                "them",
+                "my",
+                "your",
+                "his",
+                "its",
+                "our",
+                "their",
+                "и",
+                "в",
+                "не",
+                "на",
+                "я",
+                "быть",
+                "он",
+                "с",
+                "что",
+                "а",
+                "по",
+                "это",
+                "она",
+                "к",
+                "но",
+                "мы",
+                "как",
+                "из",
+                "у",
+                "то",
+                "за",
+                "свой",
+                "ее",
+                "который",
+                "весь",
+                "год",
+                "от",
+                "так",
+                "о",
+                "для",
+                "ты",
+                "же",
+                "все",
+                "тот",
+                "мочь",
+                "вы",
+                "человек",
+                "такой",
             }
             words = [w for w in all_text.split() if len(w) > 3 and w not in stop_words]
             from collections import Counter
+
             topics = [word for word, _ in Counter(words).most_common(5)]
 
         duration_mins = episode.duration_seconds / 60
         return (
             f"Episode {episode.episode_id}: {episode.message_count} messages, "
             f"{duration_mins:.1f}min duration"
-            f"{f' (topics: {', '.join(topics)})' if topics else ''}"
+            f"{f' (topics: {", ".join(topics)})' if topics else ''}"
         )
 
 

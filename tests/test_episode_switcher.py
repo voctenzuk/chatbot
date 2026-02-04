@@ -9,7 +9,7 @@ Tests cover:
 
 import pytest
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import numpy as np
 
@@ -17,10 +17,8 @@ from bot.services.episode_switcher import (
     EpisodeConfig,
     EpisodeManager,
     SimpleEmbeddingProvider,
-    OpenAIEmbeddingProvider,
     Message,
     Episode,
-    SwitchDecision,
     get_episode_manager,
     set_episode_manager,
 )
@@ -51,7 +49,7 @@ class TestSimpleEmbeddingProvider:
         # Use more distinct texts to ensure clear differentiation
         texts = ["Hello world today", "Goodbye world tomorrow", "Hello world today"]
         embeddings = await provider.embed(texts)
-    
+
         assert len(embeddings) == 3
         # Identical texts should have perfect similarity
         sim_identical = np.dot(embeddings[0], embeddings[2])  # Same text
@@ -412,9 +410,7 @@ class TestSyntheticDialogues:
         switch_count = 0
         for i, (content, delay_sec) in enumerate(dialogue):
             ts = base_time + timedelta(seconds=delay_sec)
-            msg, decision = await manager.add_message(
-                user_id=1, content=content, timestamp=ts
-            )
+            msg, decision = await manager.add_message(user_id=1, content=content, timestamp=ts)
             if decision.should_switch:
                 switch_count += 1
 
@@ -442,10 +438,10 @@ class TestSyntheticDialogues:
 
         decisions = []
         for content, delay_sec in dialogue:
-            ts = base_time + timedelta(seconds=delay_sec + 300)  # Add 5 min to each for min_duration
-            msg, decision = await manager.add_message(
-                user_id=1, content=content, timestamp=ts
-            )
+            ts = base_time + timedelta(
+                seconds=delay_sec + 300
+            )  # Add 5 min to each for min_duration
+            msg, decision = await manager.add_message(user_id=1, content=content, timestamp=ts)
             decisions.append(decision)
 
         # Count actual switches
@@ -460,9 +456,7 @@ class TestSyntheticDialogues:
         base_time = datetime.now()
 
         # Morning conversation
-        await manager.add_message(
-            user_id=1, content="Good morning!", timestamp=base_time
-        )
+        await manager.add_message(user_id=1, content="Good morning!", timestamp=base_time)
         await manager.add_message(
             user_id=1, content="How did you sleep?", timestamp=base_time + timedelta(minutes=6)
         )
@@ -508,7 +502,9 @@ class TestSyntheticDialogues:
 
         # More user 1 messages
         await manager.add_message(
-            user_id=1, content="Continuing my conversation", timestamp=base_time + timedelta(seconds=20)
+            user_id=1,
+            content="Continuing my conversation",
+            timestamp=base_time + timedelta(seconds=20),
         )
 
         # Check isolation
@@ -557,7 +553,11 @@ class TestEpisodeSummary:
             end_time=now + timedelta(minutes=10),
             messages=[
                 Message(content="Hello there", timestamp=now, user_id=1),
-                Message(content="How are you doing today", timestamp=now + timedelta(minutes=5), user_id=1),
+                Message(
+                    content="How are you doing today",
+                    timestamp=now + timedelta(minutes=5),
+                    user_id=1,
+                ),
             ],
         )
 
@@ -618,9 +618,7 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_empty_message(self, manager):
         """Test handling of empty message."""
-        msg, decision = await manager.add_message(
-            user_id=1, content="", timestamp=datetime.now()
-        )
+        msg, decision = await manager.add_message(user_id=1, content="", timestamp=datetime.now())
 
         assert msg.content == ""
 
@@ -653,23 +651,19 @@ class TestEdgeCases:
 
         # First establish a topic
         await manager.add_message(
-            user_id=1, content="I love discussing cats and pets",
-            timestamp=base_time
+            user_id=1, content="I love discussing cats and pets", timestamp=base_time
         )
         await manager.add_message(
-            user_id=1, content="My cat is adorable",
-            timestamp=base_time + timedelta(minutes=6)
+            user_id=1, content="My cat is adorable", timestamp=base_time + timedelta(minutes=6)
         )
         await manager.add_message(
-            user_id=1, content="Do you have any pets?",
-            timestamp=base_time + timedelta(minutes=12)
+            user_id=1, content="Do you have any pets?", timestamp=base_time + timedelta(minutes=12)
         )
 
         # Long time gap + topic shift
         future = base_time + timedelta(hours=3)
         msg, decision = await manager.add_message(
-            user_id=1, content="The weather is terrible today",
-            timestamp=future
+            user_id=1, content="The weather is terrible today", timestamp=future
         )
 
         # Should trigger due to time gap at minimum
