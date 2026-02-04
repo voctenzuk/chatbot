@@ -559,6 +559,61 @@ class TestExtractFactsForMem0:
         assert len(facts) == 1
         assert facts[0].text == "B"
 
+    def test_extract_explicit_zero_confidence(self):
+        """Test that explicit min_confidence=0.0 is honored (not treated as falsy)."""
+        config = SummarizerConfig(min_fact_confidence=0.8)
+        summarizer = Summarizer(config=config)
+
+        summary_json = SummaryJSON(
+            facts_candidates=[
+                FactCandidate(text="Low confidence", confidence=0.1),
+                FactCandidate(text="Medium", confidence=0.5),
+                FactCandidate(text="High", confidence=0.9),
+            ]
+        )
+        result = SummaryResult(
+            kind=SummaryKind.FINAL,
+            summary_text="Test",
+            summary_json=summary_json,
+        )
+
+        # Explicit 0.0 should return ALL facts, not use config default (0.8)
+        facts = summarizer.extract_facts_for_mem0(result, min_confidence=0.0)
+
+        assert len(facts) == 3
+        assert facts[0].text == "Low confidence"
+        assert facts[1].text == "Medium"
+        assert facts[2].text == "High"
+
+    def test_extract_max_facts_per_summary(self):
+        """Test that max_facts_per_summary is enforced."""
+        config = SummarizerConfig(min_fact_confidence=0.0, max_facts_per_summary=3)
+        summarizer = Summarizer(config=config)
+
+        summary_json = SummaryJSON(
+            facts_candidates=[
+                FactCandidate(text="Fact 1", confidence=0.9),
+                FactCandidate(text="Fact 2", confidence=0.85),
+                FactCandidate(text="Fact 3", confidence=0.8),
+                FactCandidate(text="Fact 4", confidence=0.75),
+                FactCandidate(text="Fact 5", confidence=0.7),
+            ]
+        )
+        result = SummaryResult(
+            kind=SummaryKind.FINAL,
+            summary_text="Test",
+            summary_json=summary_json,
+        )
+
+        facts = summarizer.extract_facts_for_mem0(result)
+
+        # Should be limited to max_facts_per_summary (3)
+        assert len(facts) == 3
+        # Should keep order (first 3 match the threshold)
+        assert facts[0].text == "Fact 1"
+        assert facts[1].text == "Fact 2"
+        assert facts[2].text == "Fact 3"
+
 
 @pytest.mark.asyncio
 class TestGenerateRunningSummary:
@@ -753,6 +808,35 @@ class TestGlobalInstance:
         summarizer = get_summarizer(config)
 
         assert summarizer.config.running_summary_interval == 5
+
+    def test_get_summarizer_honors_llm_provider_override(self):
+        """Test that get_summarizer rebuilds when llm_provider differs."""
+        set_summarizer(None)  # Reset
+
+        # Create first instance with mock provider
+        mock_provider_1 = MagicMock()
+        summarizer_1 = get_summarizer(llm_provider=mock_provider_1)
+        assert summarizer_1.llm_provider is mock_provider_1
+
+        # Calling again with same provider should return same instance
+        summarizer_1_again = get_summarizer(llm_provider=mock_provider_1)
+        assert summarizer_1_again is summarizer_1
+
+        # Calling with different provider should create new instance
+        mock_provider_2 = MagicMock()
+        summarizer_2 = get_summarizer(llm_provider=mock_provider_2)
+        assert summarizer_2 is not summarizer_1
+        assert summarizer_2.llm_provider is mock_provider_2
+
+    def test_get_summarizer_no_rebuild_when_provider_same(self):
+        """Test that get_summarizer does not rebuild when same provider passed."""
+        set_summarizer(None)  # Reset
+
+        mock_provider = MagicMock()
+        summarizer_1 = get_summarizer(llm_provider=mock_provider)
+        summarizer_2 = get_summarizer(llm_provider=mock_provider)
+
+        assert summarizer_1 is summarizer_2
 
     def test_set_summarizer(self):
         """Test setting global instance."""
