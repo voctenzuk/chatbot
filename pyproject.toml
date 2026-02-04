@@ -52,5 +52,4 @@ root = "src"
 line-length = 100
 
 [tool.pyright]
-venvPath = "."
-venv = ".venv"
+# CI runs without venv; keep pyright.conf minimal
