@@ -165,9 +165,8 @@ class EpisodeManager:
             )
 
         # Check if we need to seed in-memory state from DB
-        current_in_memory = self._in_memory_manager._current_episode.get(user_id)
-        if current_in_memory is None and self.db:
-            # Try to seed state from DB to prevent unnecessary splits
+        # This prevents unnecessary episode splits after restart when DB has active episode
+        if self._in_memory_manager._current_episode.get(user_id) is None and self.db:
             await self._seed_in_memory_state_from_db(user_id)
 
         # Get last message time from database
@@ -196,18 +195,8 @@ class EpisodeManager:
                             trigger_type="time_gap",
                         )
 
-                # We have an active DB episode and no time-gap trigger.
-                # Don't start a new episode just because in-memory state is empty.
-                # The in-memory state has been seeded above, so continue in same episode.
-                if current_in_memory is None or not current_in_memory.messages:
-                    return SwitchDecision(
-                        should_switch=False,
-                        reason="Continuing active DB episode",
-                        confidence=1.0,
-                        trigger_type=None,
-                    )
-
-        # Fall back to in-memory evaluation
+        # Use in-memory evaluation for topic shift detection.
+        # If we seeded from DB above, the in-memory manager now has state to compare against.
         return await self._in_memory_manager.evaluate_switch(user_id, content)
 
     async def process_user_message(

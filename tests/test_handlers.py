@@ -275,3 +275,82 @@ class TestExtractMessageContent:
         assert "[Caption: Check this out]" in result
         assert "[Photo attached]" in result
         assert "[Document: file.txt]" in result
+
+
+class TestDatabaseInitializationErrorHandling:
+    """Tests for database initialization error handling.
+
+    These tests verify that when the database is unavailable:
+    1. EpisodeManagerUnavailableError is raised
+    2. Handlers catch this error and inform users
+    3. Messages are not silently dropped
+    """
+
+    @pytest.mark.asyncio
+    async def test_start_handler_handles_db_unavailable(self):
+        """Test that start handler informs user when DB is unavailable."""
+        from bot.handlers import EpisodeManagerUnavailableError
+
+        message = MockMessage(text="/start", user_id=12345)
+
+        with patch(
+            "bot.handlers.get_episode_manager_service",
+            side_effect=EpisodeManagerUnavailableError("DB failed"),
+        ):
+            await start(message)
+
+        # Should still respond but with a warning note
+        assert hasattr(message, "_last_answer")
+        assert "рядом" in message._last_answer  # Bot responds
+        assert "⚠️" in message._last_answer or "не сохраняются" in message._last_answer
+
+    @pytest.mark.asyncio
+    async def test_chat_handler_handles_db_unavailable(self):
+        """Test that chat handler informs user when DB is unavailable."""
+        from bot.handlers import EpisodeManagerUnavailableError
+
+        message = MockMessage(text="Hello", user_id=12345)
+
+        with patch(
+            "bot.handlers.get_episode_manager_service",
+            side_effect=EpisodeManagerUnavailableError("DB failed"),
+        ):
+            await chat(message)
+
+        # Should still respond but with a warning note
+        assert hasattr(message, "_last_answer")
+        assert "услышала" in message._last_answer  # Bot responds
+        assert "⚠️" in message._last_answer or "не сохраняются" in message._last_answer
+
+    @pytest.mark.asyncio
+    async def test_get_episode_manager_service_raises_on_db_failure(self):
+        """Test that service initialization raises on DB failure."""
+        from bot.handlers import (
+            EpisodeManagerUnavailableError,
+            get_episode_manager_service,
+        )
+
+        with patch("bot.handlers.DB_CLIENT_AVAILABLE", True):
+            with patch(
+                "bot.handlers.get_db_client", side_effect=RuntimeError("DB connection failed")
+            ):
+                with pytest.raises(EpisodeManagerUnavailableError) as exc_info:
+                    await get_episode_manager_service()
+
+                assert "Database initialization failed" in str(exc_info.value)
+                assert exc_info.value.cause is not None
+
+    @pytest.mark.asyncio
+    async def test_handler_fallback_on_unexpected_error(self):
+        """Test that handlers have fallback for unexpected errors."""
+        message = MockMessage(text="Hello", user_id=12345)
+
+        with patch(
+            "bot.handlers.get_episode_manager_service",
+            side_effect=Exception("Unexpected error"),
+        ):
+            await chat(message)
+
+        # Should still respond with fallback
+        assert hasattr(message, "_last_answer")
+        assert "услышала" in message._last_answer

@@ -24,11 +24,28 @@ except ImportError:
 router = Router()
 
 
+class EpisodeManagerUnavailableError(Exception):
+    """Raised when episode manager cannot be initialized.
+
+    This is a wrapper around database initialization errors to provide
+    a cleaner interface for handlers.
+    """
+
+    def __init__(
+        self, message: str = "Message persistence unavailable", cause: Exception | None = None
+    ) -> None:
+        super().__init__(message)
+        self.cause = cause
+
+
 async def get_episode_manager_service() -> EpisodeManager:
     """Get or initialize episode manager service.
 
     Returns:
-        Configured EpisodeManager instance
+        Configured EpisodeManager instance.
+
+    Raises:
+        EpisodeManagerUnavailableError: If database initialization fails.
     """
     manager = get_episode_manager()
 
@@ -40,7 +57,16 @@ async def get_episode_manager_service() -> EpisodeManager:
                 manager = EpisodeManager(db_client=db_client)
                 set_episode_manager(manager)
         except Exception as e:
-            logger.warning("Failed to initialize database client for episode manager: {}", e)
+            # Log loudly and raise a clear error - do not silently fail
+            logger.error(
+                "Failed to initialize database client for episode manager: {}. "
+                "Message persistence will be unavailable.",
+                e,
+            )
+            raise EpisodeManagerUnavailableError(
+                "Database initialization failed - messages cannot be persisted",
+                cause=e,
+            ) from e
 
     # Ensure we always return a valid EpisodeManager
     if manager is None:
@@ -77,6 +103,13 @@ async def start(message: Message) -> None:
 
         await message.answer(response)
 
+    except EpisodeManagerUnavailableError as e:
+        logger.error("Episode manager unavailable for user {}: {}", user_id, e)
+        # Inform user that persistence is unavailable but still respond
+        await message.answer(
+            "Привет. Я рядом 🙂\nРасскажи, как тебя зовут?\n\n"
+            "⚠️ Примечание: в данный момент сообщения не сохраняются в базе данных."
+        )
     except Exception as e:
         logger.error("Error in start handler for user {}: {}", user_id, e)
         # Fallback response
@@ -124,6 +157,13 @@ async def chat(message: Message) -> None:
 
         await message.answer(response)
 
+    except EpisodeManagerUnavailableError as e:
+        logger.error("Episode manager unavailable for user {}: {}", user_id, e)
+        # Inform user that persistence is unavailable but still respond
+        await message.answer(
+            "Я тебя услышала. (Пока что это заглушка — подключим LLM + память.)\n\n"
+            "⚠️ Примечание: в данный момент сообщения не сохраняются в базе данных."
+        )
     except Exception as e:
         logger.error("Error in chat handler for user {}: {}", user_id, e)
         # Fallback response without persistence

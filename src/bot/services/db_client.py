@@ -454,6 +454,25 @@ class DatabaseClient:
             logger.error("Failed to get message {}: {}", message_id, e)
             raise
 
+    @staticmethod
+    def _normalize_message_row(row: dict[str, Any]) -> dict[str, Any]:
+        """Normalize RPC message row to match EpisodeMessage.from_row expectations.
+
+        The get_recent_messages RPC returns 'message_id' but EpisodeMessage.from_row
+        expects 'id'. This method normalizes the row by mapping message_id to id.
+
+        Args:
+            row: Raw row from RPC response.
+
+        Returns:
+            Normalized row with 'id' key.
+        """
+        normalized = dict(row)
+        # RPC returns 'message_id', but from_row expects 'id'
+        if "message_id" in normalized and "id" not in normalized:
+            normalized["id"] = normalized.pop("message_id")
+        return normalized
+
     async def get_recent_messages(
         self,
         telegram_user_id: int,
@@ -477,7 +496,9 @@ class DatabaseClient:
                 },
             ).execute()
 
-            return [EpisodeMessage.from_row(row) for row in response.data]
+            # Normalize rows: RPC returns 'message_id' but from_row expects 'id'
+            normalized_rows = [self._normalize_message_row(row) for row in response.data]
+            return [EpisodeMessage.from_row(row) for row in normalized_rows]
         except Exception as e:
             logger.error("Failed to get recent messages for user {}: {}", telegram_user_id, e)
             return []
