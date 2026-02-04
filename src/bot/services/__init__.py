@@ -22,6 +22,27 @@ except ImportError:
     MemoryFact = None  # type: ignore
     MemoryType = None  # type: ignore
 
+try:
+    from bot.services.context_builder import (
+        ContextBuilder,
+        ContextAssemblyConfig,
+        ContextPart,
+        ConversationMessage,
+        MessageRole,
+        RunningSummary,
+        get_context_builder,
+        set_context_builder,
+    )
+except ImportError:
+    ContextBuilder = None  # type: ignore
+    ContextAssemblyConfig = None  # type: ignore
+    ContextPart = None  # type: ignore
+    ConversationMessage = None  # type: ignore
+    MessageRole = None  # type: ignore
+    RunningSummary = None  # type: ignore
+    get_context_builder = None  # type: ignore
+    set_context_builder = None  # type: ignore
+
 __all__ = [
     # Mem0 Memory Service
     "Mem0MemoryService",
@@ -31,4 +52,13 @@ __all__ = [
     "MemoryCategory",
     "MemoryFact",
     "MemoryType",
+    # Context Builder
+    "ContextBuilder",
+    "ContextAssemblyConfig",
+    "ContextPart",
+    "ConversationMessage",
+    "MessageRole",
+    "RunningSummary",
+    "get_context_builder",
+    "set_context_builder",
 ]
