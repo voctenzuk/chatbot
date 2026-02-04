@@ -39,10 +39,10 @@ from pathlib import Path
 src_path = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(src_path))
 
-from loguru import logger
+from loguru import logger  # noqa: E402
 
-from bot.services.mem0_memory_service import Mem0MemoryService, get_memory_service
-from bot.services.memory_cleanup import CleanupConfig, MemoryCleanupService
+from bot.services.mem0_memory_service import get_memory_service  # noqa: E402
+from bot.services.memory_cleanup import CleanupConfig, MemoryCleanupService  # noqa: E402
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -145,7 +145,9 @@ def show_config() -> None:
 
     print("Base Settings:")
     print(f"  Default TTL days:        {config.default_ttl_days}")
-    print(f"  Decay rate:              {config.importance_decay_rate} ({config.importance_decay_rate*100:.1f}% per day)")
+    print(
+        f"  Decay rate:              {config.importance_decay_rate} ({config.importance_decay_rate * 100:.1f}% per day)"
+    )
     print(f"  Min importance:          {config.min_importance_threshold}")
     print(f"  Max memories per user:   {config.max_memories_per_user}")
     print(f"  Max deletions per run:   {config.max_deletions_per_run}")
@@ -157,7 +159,9 @@ def show_config() -> None:
     print()
 
     print("Category TTL Multipliers:")
-    for category, multiplier in sorted(config.category_multipliers.items(), key=lambda x: x[0].value):
+    for category, multiplier in sorted(
+        config.category_multipliers.items(), key=lambda x: x[0].value
+    ):
         days = int(config.default_ttl_days * multiplier)
         print(f"  {category.value:20} {multiplier:4.1f}x ({days} days)")
     print()
@@ -267,7 +271,9 @@ async def run_cleanup(args: argparse.Namespace) -> int:
             print("\n" + "=" * 60)
             print("Cleanup Report")
             print("=" * 60)
-            print(f"Mode:              {'DRY RUN (preview only)' if dry_run else 'LIVE (changes made)'}")
+            print(
+                f"Mode:              {'DRY RUN (preview only)' if dry_run else 'LIVE (changes made)'}"
+            )
             print(f"Users processed:   {len(report.users_processed)}")
             print(f"Memories scanned:  {report.total_memories_scanned}")
             print(f"Memories kept:     {report.memories_kept}")
@@ -282,7 +288,7 @@ async def run_cleanup(args: argparse.Namespace) -> int:
                     print(f"  - {error}")
 
             if dry_run and report.memories_expired > 0:
-                print(f"\nTo actually delete these memories, run with --no-dry-run")
+                print("\nTo actually delete these memories, run with --no-dry-run")
 
             print("=" * 60)
 
@@ -312,7 +318,7 @@ def main() -> int:
     except KeyboardInterrupt:
         logger.info("Cleanup interrupted by user")
         return 130
-    except Exception as e:
+    except Exception:
         logger.exception("Unexpected error during cleanup")
         return 1
 

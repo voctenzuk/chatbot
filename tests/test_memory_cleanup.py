@@ -314,7 +314,7 @@ class TestShouldExpire:
             min_importance_threshold=0.3,
             category_multipliers={
                 MemoryCategory.SEMANTIC: 2.0,  # 180 days
-                MemoryCategory.EPISODIC: 0.5,   # 45 days
+                MemoryCategory.EPISODIC: 0.5,  # 45 days
             },
         )
         return MemoryCleanupService(config=config)
@@ -328,7 +328,9 @@ class TestShouldExpire:
             expiration_date=past_date,
         )
 
-        should_expire, reason = service._should_expire(memory, age_days=10, effective_importance=1.0)
+        should_expire, reason = service._should_expire(
+            memory, age_days=10, effective_importance=1.0
+        )
         assert should_expire is True
         assert "expiration date" in reason.lower()
 
@@ -341,7 +343,9 @@ class TestShouldExpire:
             expiration_date=future_date,
         )
 
-        should_expire, reason = service._should_expire(memory, age_days=10, effective_importance=1.0)
+        should_expire, reason = service._should_expire(
+            memory, age_days=10, effective_importance=1.0
+        )
         assert should_expire is False
 
     def test_category_ttl_exceeded(self, service):
@@ -352,7 +356,9 @@ class TestShouldExpire:
             memory_category=MemoryCategory.EPISODIC,  # 45 days TTL
         )
 
-        should_expire, reason = service._should_expire(memory, age_days=100, effective_importance=0.5)
+        should_expire, reason = service._should_expire(
+            memory, age_days=100, effective_importance=0.5
+        )
         assert should_expire is True
         assert "TTL exceeded" in reason
 
@@ -364,7 +370,9 @@ class TestShouldExpire:
             memory_category=MemoryCategory.SEMANTIC,  # 180 days TTL
         )
 
-        should_expire, reason = service._should_expire(memory, age_days=100, effective_importance=0.5)
+        should_expire, reason = service._should_expire(
+            memory, age_days=100, effective_importance=0.5
+        )
         assert should_expire is False
 
     def test_ttl_exceeded_but_high_importance(self, service):
@@ -375,7 +383,9 @@ class TestShouldExpire:
             memory_category=MemoryCategory.EPISODIC,
         )
 
-        should_expire, reason = service._should_expire(memory, age_days=100, effective_importance=1.5)
+        should_expire, reason = service._should_expire(
+            memory, age_days=100, effective_importance=1.5
+        )
         assert should_expire is False
         assert "high importance" in reason.lower()
 
@@ -386,7 +396,9 @@ class TestShouldExpire:
             user_id=123,
         )
 
-        should_expire, reason = service._should_expire(memory, age_days=10, effective_importance=0.1)
+        should_expire, reason = service._should_expire(
+            memory, age_days=10, effective_importance=0.1
+        )
         assert should_expire is True
         assert "importance threshold" in reason.lower()
 
@@ -398,7 +410,9 @@ class TestShouldExpire:
             memory_category=MemoryCategory.SEMANTIC,
         )
 
-        should_expire, reason = service._should_expire(memory, age_days=10, effective_importance=1.0)
+        should_expire, reason = service._should_expire(
+            memory, age_days=10, effective_importance=1.0
+        )
         assert should_expire is False
         assert "retention" in reason.lower()
 
@@ -494,9 +508,11 @@ class TestCleanupUser:
     def mock_memory_service(self):
         """Create mock memory service with async methods."""
         mock = MagicMock()
+
         # Make get_all_memories return an async result
         async def async_get_all(*args, **kwargs):
             return []
+
         mock.get_all_memories = async_get_all
         return mock
 
@@ -544,12 +560,12 @@ class TestCleanupUser:
     async def test_cleanup_user_scans_memories(self, service, mock_memory_service):
         """Test that all user memories are scanned."""
         memories = [
-            MemoryFact(content=f"Memory {i}", user_id=123, importance_score=1.0)
-            for i in range(5)
+            MemoryFact(content=f"Memory {i}", user_id=123, importance_score=1.0) for i in range(5)
         ]
 
         async def async_get_all(*args, **kwargs):
             return memories
+
         mock_memory_service.get_all_memories = async_get_all
 
         report = await service.cleanup_user(123, dry_run=True)
@@ -564,6 +580,7 @@ class TestCleanupUser:
         async def async_get_all(*args, **kwargs):
             calls.append(kwargs)
             return []
+
         mock_memory_service.get_all_memories = async_get_all
 
         await service.cleanup_user(123, run_id="session_abc")
@@ -595,6 +612,7 @@ class TestCleanupUser:
 
         async def async_get_all(*args, **kwargs):
             return memories
+
         mock_memory_service.get_all_memories = async_get_all
 
         report = await service.cleanup_user(123, dry_run=True)
@@ -606,8 +624,10 @@ class TestCleanupUser:
     @pytest.mark.asyncio
     async def test_cleanup_user_handles_errors(self, service, mock_memory_service):
         """Test that service errors are captured."""
+
         async def async_error(*args, **kwargs):
             raise Exception("API Error")
+
         mock_memory_service.get_all_memories = async_error
 
         report = await service.cleanup_user(123)
@@ -623,8 +643,10 @@ class TestCleanupAll:
     def mock_memory_service(self):
         """Create mock memory service with async methods."""
         mock = MagicMock()
+
         async def async_get_all(*args, **kwargs):
             return []
+
         mock.get_all_memories = async_get_all
         return mock
 
@@ -660,6 +682,7 @@ class TestCleanupAll:
             result = results[call_count[0]]
             call_count[0] += 1
             return result
+
         mock_memory_service.get_all_memories = async_get_all
 
         report = await service.cleanup_all(user_ids=[1, 2], dry_run=True)
@@ -691,6 +714,7 @@ class TestCleanupAll:
             result = results[call_count[0]]
             call_count[0] += 1
             return result
+
         mock_memory_service.get_all_memories = async_get_all
 
         report = await service.cleanup_all(user_ids=[1, 2], dry_run=True)
@@ -754,7 +778,7 @@ class TestGlobalInstance:
             mock_instance = MagicMock()
             mock_cls.return_value = mock_instance
 
-            service = get_cleanup_service(memory_service=mock_memory)
+            _service = get_cleanup_service(memory_service=mock_memory)
 
             # Verify the memory service was passed (config may be None or not, both are valid)
             call_kwargs = mock_cls.call_args.kwargs

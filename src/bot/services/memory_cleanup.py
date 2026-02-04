@@ -80,23 +80,27 @@ class CleanupConfig:
     )
 
     # Per-category TTL multipliers (relative to default_ttl_days)
-    category_multipliers: dict[MemoryCategory, float] = field(default_factory=lambda: {
-        MemoryCategory.SEMANTIC: 2.0,      # Facts live longer
-        MemoryCategory.RELATIONSHIP: 3.0,   # Relationship memories persist
-        MemoryCategory.PREFERENCE: 1.5,     # Preferences moderately long
-        MemoryCategory.EPISODIC: 0.5,       # Episodes shorter
-        MemoryCategory.EMOTIONAL: 0.75,     # Emotional memories moderate
-        MemoryCategory.PROCEDURAL: 2.5,     # Habits/routines long-lived
-    })
+    category_multipliers: dict[MemoryCategory, float] = field(
+        default_factory=lambda: {
+            MemoryCategory.SEMANTIC: 2.0,  # Facts live longer
+            MemoryCategory.RELATIONSHIP: 3.0,  # Relationship memories persist
+            MemoryCategory.PREFERENCE: 1.5,  # Preferences moderately long
+            MemoryCategory.EPISODIC: 0.5,  # Episodes shorter
+            MemoryCategory.EMOTIONAL: 0.75,  # Emotional memories moderate
+            MemoryCategory.PROCEDURAL: 2.5,  # Habits/routines long-lived
+        }
+    )
 
     # Per-type importance adjustments
-    type_importance_floor: dict[MemoryType, float] = field(default_factory=lambda: {
-        MemoryType.IDENTITY: 1.5,           # Identity facts important
-        MemoryType.GOAL: 1.2,               # Goals important
-        MemoryType.MILESTONE: 1.5,          # Milestones important
-        MemoryType.BOUNDARY: 2.0,           # Boundaries very important
-        MemoryType.HABIT: 1.0,              # Habits moderately important
-    })
+    type_importance_floor: dict[MemoryType, float] = field(
+        default_factory=lambda: {
+            MemoryType.IDENTITY: 1.5,  # Identity facts important
+            MemoryType.GOAL: 1.2,  # Goals important
+            MemoryType.MILESTONE: 1.5,  # Milestones important
+            MemoryType.BOUNDARY: 2.0,  # Boundaries very important
+            MemoryType.HABIT: 1.0,  # Habits moderately important
+        }
+    )
 
     emotional_valence_boost: float = field(
         default_factory=lambda: float(os.getenv("MEMORY_EMOTIONAL_BOOST", "0.2"))
@@ -305,9 +309,7 @@ class MemoryCleanupService:
                 return True, "Explicit expiration date reached"
 
         # Check category-based TTL
-        category_ttl_days = self.config.get_ttl_for_category(
-            memory.memory_category
-        ).days
+        category_ttl_days = self.config.get_ttl_for_category(memory.memory_category).days
         if age_days > category_ttl_days:
             # Even expired by TTL, keep if importance is high
             if effective_importance >= 1.5:
@@ -316,7 +318,10 @@ class MemoryCleanupService:
 
         # Check minimum importance threshold
         if effective_importance < self.config.min_importance_threshold:
-            return True, f"Below importance threshold ({effective_importance:.2f} < {self.config.min_importance_threshold})"
+            return (
+                True,
+                f"Below importance threshold ({effective_importance:.2f} < {self.config.min_importance_threshold})",
+            )
 
         return False, "Within retention criteria"
 
@@ -342,9 +347,7 @@ class MemoryCleanupService:
         effective_importance = self._calculate_effective_importance(memory, age_days)
 
         # Check if should expire
-        should_expire, reason = self._should_expire(
-            memory, age_days, effective_importance
-        )
+        should_expire, reason = self._should_expire(memory, age_days, effective_importance)
 
         if should_expire:
             action = CleanupAction.EXPIRE
@@ -356,7 +359,9 @@ class MemoryCleanupService:
 
         return MemoryDecision(
             memory_id=memory.fact_id,
-            content_preview=memory.content[:100] + "..." if len(memory.content) > 100 else memory.content,
+            content_preview=memory.content[:100] + "..."
+            if len(memory.content) > 100
+            else memory.content,
             action=action,
             original_importance=memory.importance_score,
             effective_importance=effective_importance,
@@ -431,7 +436,7 @@ class MemoryCleanupService:
             # Apply deletions if not dry run
             if not dry_run and to_delete:
                 deletion_count = 0
-                for memory_id in to_delete[:self.config.max_deletions_per_run]:
+                for memory_id in to_delete[: self.config.max_deletions_per_run]:
                     try:
                         # Note: mem0 OSS API may not support single memory deletion
                         # This is a placeholder for the actual deletion logic
@@ -535,8 +540,7 @@ class MemoryCleanupService:
             "batch_size": self.config.batch_size,
             "max_deletions_per_run": self.config.max_deletions_per_run,
             "category_multipliers": {
-                cat.value: mult
-                for cat, mult in self.config.category_multipliers.items()
+                cat.value: mult for cat, mult in self.config.category_multipliers.items()
             },
         }
 
