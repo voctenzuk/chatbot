@@ -11,6 +11,7 @@ def run() -> None:
 
 
 async def _amain() -> None:
+    assert settings.telegram_bot_token is not None, "TELEGRAM_BOT_TOKEN not set"
     bot = Bot(token=settings.telegram_bot_token, parse_mode=ParseMode.HTML)
     dp = Dispatcher()
     dp.include_router(router)
