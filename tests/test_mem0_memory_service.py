@@ -584,7 +584,7 @@ class TestDocumentationPresent:
         import bot.services.mem0_memory_service as module
 
         docstring = module.__doc__ or ""
-        assert "pgvector" in docstring.lower() or "PGVECTOR" in module.mem0_memory_service.__doc__
+        assert "pgvector" in docstring.lower() or "PGVECTOR" in docstring
 
     def test_ingestion_instructions_present(self):
         """Verify ingestion instructions are present in module."""
