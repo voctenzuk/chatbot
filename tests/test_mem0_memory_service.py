@@ -5,16 +5,14 @@ All Mem0 API interactions are mocked using unittest.mock.MagicMock.
 """
 
 import pytest
-from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 from bot.services.mem0_memory_service import (
     Mem0MemoryService,
     get_memory_service,
     set_memory_service,
-    MEM0_AVAILABLE,
 )
-from bot.services.memory_models import MemoryType, MemoryCategory, MemoryFact
+from bot.services.memory_models import MemoryType, MemoryCategory
 
 
 class TestMem0MemoryServiceUnit:
@@ -408,13 +406,23 @@ class TestMem0MemoryServiceIntegrationPatterns:
         # Setup mocks
         mock_client.add.side_effect = [
             {"results": [{"id": "fact_1"}]},  # First call: factual
-            {"results": [{"id": "ep_1"}]},    # Second call: episodic
-            {"results": [{"id": "ep_2"}]},    # Third call: episodic
+            {"results": [{"id": "ep_1"}]},  # Second call: episodic
+            {"results": [{"id": "ep_2"}]},  # Third call: episodic
         ]
         mock_client.search.return_value = {
             "results": [
-                {"id": "fact_1", "memory": "User likes Python", "metadata": {}, "created_at": "2024-01-15T10:30:00Z"},
-                {"id": "ep_1", "memory": "Discussed async", "metadata": {}, "created_at": "2024-01-15T10:35:00Z"},
+                {
+                    "id": "fact_1",
+                    "memory": "User likes Python",
+                    "metadata": {},
+                    "created_at": "2024-01-15T10:30:00Z",
+                },
+                {
+                    "id": "ep_1",
+                    "memory": "Discussed async",
+                    "metadata": {},
+                    "created_at": "2024-01-15T10:35:00Z",
+                },
             ]
         }
 
@@ -523,12 +531,16 @@ class TestMem0MemoryServiceConfiguration:
 
         with patch("bot.services.mem0_memory_service.MEM0_AVAILABLE", True):
             with patch("bot.services.mem0_memory_service.MemoryClient", return_value=mock_client):
-                with patch.dict("os.environ", {
-                    "MEM0_API_KEY": "test_key",
-                    "MEM0_PROJECT_ID": "test_project",
-                    "MEM0_ORG_ID": "test_org",
-                    "MEM0_HOST": "http://localhost:8000",
-                }, clear=True):
+                with patch.dict(
+                    "os.environ",
+                    {
+                        "MEM0_API_KEY": "test_key",
+                        "MEM0_PROJECT_ID": "test_project",
+                        "MEM0_ORG_ID": "test_org",
+                        "MEM0_HOST": "http://localhost:8000",
+                    },
+                    clear=True,
+                ):
                     service = Mem0MemoryService()
 
         assert service._api_key == "test_key"

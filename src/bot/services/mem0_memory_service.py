@@ -22,9 +22,7 @@ Ingestion Guidelines:
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
 from typing import Any, Protocol
 from unittest.mock import MagicMock
 
@@ -312,10 +310,7 @@ class Mem0MemoryService:
             return
 
         if not MEM0_AVAILABLE:
-            raise RuntimeError(
-                "mem0 package is not installed. "
-                "Install it with: pip install mem0ai"
-            )
+            raise RuntimeError("mem0 package is not installed. Install it with: pip install mem0ai")
 
         # Get configuration from parameters or settings/env vars
         self._api_key = api_key or settings.mem0_api_key or os.getenv("MEM0_API_KEY")
@@ -394,14 +389,16 @@ class Mem0MemoryService:
 
         # Build metadata for factual memory
         fact_metadata = (metadata or {}).copy()
-        fact_metadata.update({
-            "memory_type": memory_type.value,
-            "memory_category": MemoryCategory.SEMANTIC.value,
-            "importance_score": importance,
-            "tags": tags or [],
-            "is_factual": True,
-            "source": "telegram_bot",
-        })
+        fact_metadata.update(
+            {
+                "memory_type": memory_type.value,
+                "memory_category": MemoryCategory.SEMANTIC.value,
+                "importance_score": importance,
+                "tags": tags or [],
+                "is_factual": True,
+                "source": "telegram_bot",
+            }
+        )
 
         try:
             # Use a user message format for the memory
@@ -470,15 +467,17 @@ class Mem0MemoryService:
 
         # Build metadata for episodic memory
         episodic_metadata = (metadata or {}).copy()
-        episodic_metadata.update({
-            "memory_type": memory_type.value,
-            "memory_category": MemoryCategory.EPISODIC.value,
-            "importance_score": importance,
-            "tags": tags or [],
-            "is_episodic": True,
-            "emotional_valence": emotional_valence,
-            "source": "telegram_bot",
-        })
+        episodic_metadata.update(
+            {
+                "memory_type": memory_type.value,
+                "memory_category": MemoryCategory.EPISODIC.value,
+                "importance_score": importance,
+                "tags": tags or [],
+                "is_episodic": True,
+                "emotional_valence": emotional_valence,
+                "source": "telegram_bot",
+            }
+        )
 
         try:
             # Use a user message format for the memory

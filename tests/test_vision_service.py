@@ -45,9 +45,9 @@ class TestVisionService:
         """Test describing image from bytes."""
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
-        mock_response.json = MagicMock(return_value={
-            "choices": [{"message": {"content": "Фото заката на пляже"}}]
-        })
+        mock_response.json = MagicMock(
+            return_value={"choices": [{"message": {"content": "Фото заката на пляже"}}]}
+        )
         service.client.post = AsyncMock(return_value=mock_response)
 
         image_bytes = b"fake_image_data"
@@ -61,9 +61,9 @@ class TestVisionService:
         """Test describing image from base64 string."""
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
-        mock_response.json = MagicMock(return_value={
-            "choices": [{"message": {"content": "Портрет девушки"}}]
-        })
+        mock_response.json = MagicMock(
+            return_value={"choices": [{"message": {"content": "Портрет девушки"}}]}
+        )
         service.client.post = AsyncMock(return_value=mock_response)
 
         result = await service.describe_image("base64string", user_id=456)
@@ -74,9 +74,9 @@ class TestVisionService:
         """Test describing AI-generated image."""
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
-        mock_response.json = MagicMock(return_value={
-            "choices": [{"message": {"content": "Красивый пейзаж"}}]
-        })
+        mock_response.json = MagicMock(
+            return_value={"choices": [{"message": {"content": "Красивый пейзаж"}}]}
+        )
         service.client.post = AsyncMock(return_value=mock_response)
 
         result = await service.describe_generated_image(
