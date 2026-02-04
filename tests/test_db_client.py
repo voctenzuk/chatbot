@@ -272,3 +272,62 @@ async def test_upsert_episode_summary(db_client: DatabaseClient):
     )
     assert isinstance(summary, EpisodeSummary)
     assert summary.episode_id == episode.id
+
+
+@pytest.mark.asyncio
+async def test_get_recent_messages_normalizes_message_id(db_client: DatabaseClient):
+    """Regression test: RPC returns 'message_id' but EpisodeMessage.from_row expects 'id'.
+
+    This test verifies that get_recent_messages correctly normalizes RPC response rows
+    by mapping 'message_id' to 'id' before constructing EpisodeMessage objects.
+    """
+    # Setup: Create thread, episode, and messages
+    thread = await db_client.get_or_create_thread(123)
+    episode = await db_client.start_new_episode(thread.id)
+    _ = await db_client.add_message(telegram_user_id=123, role="user", content_text="Hello")
+    _ = await db_client.add_message(telegram_user_id=123, role="assistant", content_text="Hi!")
+
+    # Test: get_recent_messages should return properly constructed EpisodeMessage objects
+    recent_messages = await db_client.get_recent_messages(telegram_user_id=123, limit=10)
+
+    # Verify: All messages should have valid IDs (not empty/None)
+    assert len(recent_messages) == 2
+    for msg in recent_messages:
+        assert isinstance(msg, EpisodeMessage)
+        assert msg.id is not None
+        assert len(str(msg.id)) > 0
+        assert msg.episode_id == episode.id
+
+
+@pytest.mark.asyncio
+async def test_normalize_message_row_unit():
+    """Unit test for _normalize_message_row static method.
+
+    Verifies that rows with 'message_id' are correctly normalized to use 'id'.
+    """
+    # RPC response row (has 'message_id', no 'id')
+    rpc_row = {
+        "message_id": "msg_abc123",
+        "episode_id": "ep_xyz789",
+        "role": "user",
+        "content_text": "Hello",
+        "created_at": datetime.now().isoformat(),
+    }
+
+    # Normalize the row
+    normalized = DatabaseClient._normalize_message_row(rpc_row)
+
+    # Verify: 'id' should be present and equal to original 'message_id'
+    assert "id" in normalized
+    assert normalized["id"] == "msg_abc123"
+    assert "message_id" not in normalized
+
+    # Verify other fields are preserved
+    assert normalized["episode_id"] == "ep_xyz789"
+    assert normalized["role"] == "user"
+    assert normalized["content_text"] == "Hello"
+
+    # Verify EpisodeMessage can be constructed from normalized row
+    msg = EpisodeMessage.from_row(normalized)
+    assert msg.id == "msg_abc123"
+    assert msg.episode_id == "ep_xyz789"
