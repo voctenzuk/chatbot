@@ -3,7 +3,6 @@
 import io
 import pytest
 from unittest.mock import MagicMock, AsyncMock
-from datetime import datetime
 
 from bot.services.artifact_service import (
     Artifact,
@@ -20,8 +19,6 @@ from bot.services.artifact_service import (
 from bot.services.storage_backend import (
     LocalStorageBackend,
     StorageReference,
-    get_storage_backend,
-    set_storage_backend,
 )
 
 
