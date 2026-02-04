@@ -559,6 +559,31 @@ class TestExtractFactsForMem0:
         assert len(facts) == 1
         assert facts[0].text == "B"
 
+    def test_extract_with_zero_confidence_override(self):
+        """Test extraction with min_confidence=0.0 (edge case for falsy value)."""
+        summarizer = Summarizer(config=SummarizerConfig(min_fact_confidence=0.7))
+
+        summary_json = SummaryJSON(
+            facts_candidates=[
+                FactCandidate(text="Zero fact", confidence=0.0),
+                FactCandidate(text="Low fact", confidence=0.1),
+                FactCandidate(text="Below default", confidence=0.6),
+            ]
+        )
+        result = SummaryResult(
+            kind=SummaryKind.FINAL,
+            summary_text="Test",
+            summary_json=summary_json,
+        )
+
+        # With min_confidence=0.0, should return all facts (not use default 0.7)
+        facts = summarizer.extract_facts_for_mem0(result, min_confidence=0.0)
+
+        assert len(facts) == 3
+        assert facts[0].text == "Zero fact"
+        assert facts[1].text == "Low fact"
+        assert facts[2].text == "Below default"
+
 
 @pytest.mark.asyncio
 class TestGenerateRunningSummary:

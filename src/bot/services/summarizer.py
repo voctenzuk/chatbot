@@ -614,7 +614,9 @@ class Summarizer:
         if not summary_result.summary_json:
             return []
 
-        threshold = min_confidence or self.config.min_fact_confidence
+        threshold = (
+            min_confidence if min_confidence is not None else self.config.min_fact_confidence
+        )
         return summary_result.summary_json.get_high_confidence_facts(threshold)
 
 
