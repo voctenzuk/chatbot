@@ -1,5 +1,3 @@
-
-
 @pytest.mark.asyncio
 async def test_get_recent_messages_normalizes_message_id(db_client: DatabaseClient):
     """Regression test: RPC get_recent_messages returns 'message_id' but EpisodeMessage.from_row expects 'id'.
@@ -13,7 +11,9 @@ async def test_get_recent_messages_normalizes_message_id(db_client: DatabaseClie
 
     # Add some messages
     msg1 = await db_client.add_message(telegram_user_id=123, role="user", content_text="Hello")
-    msg2 = await db_client.add_message(telegram_user_id=123, role="assistant", content_text="Hi there")
+    msg2 = await db_client.add_message(
+        telegram_user_id=123, role="assistant", content_text="Hi there"
+    )
 
     # Get recent messages (mock returns 'message_id', not 'id')
     messages = await db_client.get_recent_messages(telegram_user_id=123, limit=10)
