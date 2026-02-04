@@ -50,7 +50,8 @@ async def get_episode_manager_service() -> EpisodeManager:
     manager = get_episode_manager()
 
     # Initialize with database client if not already set
-    if manager is not None and manager.db is None and DB_CLIENT_AVAILABLE:
+    manager_db = getattr(manager, "db", None) if manager is not None else None
+    if manager is not None and manager_db is None and DB_CLIENT_AVAILABLE:
         try:
             if get_db_client is not None:
                 db_client = get_db_client()
