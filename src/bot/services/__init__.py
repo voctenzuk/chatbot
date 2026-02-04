@@ -125,6 +125,52 @@ except ImportError:
     get_summarizer = None  # type: ignore
     set_summarizer = None  # type: ignore
 
+# Artifact Service
+try:
+    from bot.services.artifact_service import (
+        Artifact,
+        ArtifactProcessingStatus,
+        ArtifactService,
+        ArtifactText,
+        ArtifactType,
+        CreateArtifactRequest,
+        CreateArtifactResult,
+        TextSurrogateForContext,
+        TextSurrogateKind,
+        get_artifact_service,
+        set_artifact_service,
+    )
+except ImportError:
+    Artifact = None  # type: ignore
+    ArtifactProcessingStatus = None  # type: ignore
+    ArtifactService = None  # type: ignore
+    ArtifactText = None  # type: ignore
+    ArtifactType = None  # type: ignore
+    CreateArtifactRequest = None  # type: ignore
+    CreateArtifactResult = None  # type: ignore
+    TextSurrogateForContext = None  # type: ignore
+    TextSurrogateKind = None  # type: ignore
+    get_artifact_service = None  # type: ignore
+    set_artifact_service = None  # type: ignore
+
+# Storage Backend
+try:
+    from bot.services.storage_backend import (
+        LocalStorageBackend,
+        S3StorageBackend,
+        StorageBackend,
+        StorageReference,
+        get_storage_backend,
+        set_storage_backend,
+    )
+except ImportError:
+    LocalStorageBackend = None  # type: ignore
+    S3StorageBackend = None  # type: ignore
+    StorageBackend = None  # type: ignore
+    StorageReference = None  # type: ignore
+    get_storage_backend = None  # type: ignore
+    set_storage_backend = None  # type: ignore
+
 __all__ = [
     # Episode Manager Service
     "EpisodeManager",
@@ -175,4 +221,23 @@ __all__ = [
     "ArtifactReference",
     "get_summarizer",
     "set_summarizer",
+    # Artifact Service
+    "Artifact",
+    "ArtifactProcessingStatus",
+    "ArtifactService",
+    "ArtifactText",
+    "ArtifactType",
+    "CreateArtifactRequest",
+    "CreateArtifactResult",
+    "TextSurrogateForContext",
+    "TextSurrogateKind",
+    "get_artifact_service",
+    "set_artifact_service",
+    # Storage Backend
+    "LocalStorageBackend",
+    "S3StorageBackend",
+    "StorageBackend",
+    "StorageReference",
+    "get_storage_backend",
+    "set_storage_backend",
 ]
