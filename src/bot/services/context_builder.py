@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Optional
 
 from loguru import logger
 
@@ -394,7 +394,7 @@ class ContextBuilder:
 
     def build_artifact_surrogates_part(
         self,
-        surrogates: list[Any],
+        surrogates: Optional[list[Any]],
     ) -> ContextPart | None:
         """Build context part from artifact text surrogates.
 
