@@ -691,3 +691,282 @@ class TestGlobalInstance:
     def teardown_method(self):
         """Clean up after each test."""
         set_context_builder(None)
+
+
+class TestArtifactSurrogateConfig:
+    """Tests for artifact surrogate configuration."""
+
+    def test_default_artifact_config(self):
+        """Test default artifact configuration values."""
+        config = ContextAssemblyConfig()
+
+        assert config.max_artifact_surrogates == 5
+        assert config.max_artifact_tokens == 800
+        assert config.max_surrogates_per_artifact == 2
+
+    def test_custom_artifact_config(self):
+        """Test custom artifact configuration."""
+        config = ContextAssemblyConfig(
+            max_artifact_surrogates=10,
+            max_artifact_tokens=1000,
+            max_surrogates_per_artifact=3,
+        )
+
+        assert config.max_artifact_surrogates == 10
+        assert config.max_artifact_tokens == 1000
+        assert config.max_surrogates_per_artifact == 3
+
+    def test_default_order_includes_artifacts(self):
+        """Test that default order includes artifact_surrogates."""
+        config = ContextAssemblyConfig()
+
+        assert "artifact_surrogates" in config.order
+
+
+class TestBuildArtifactSurrogatesPart:
+    """Tests for building artifact surrogates context part."""
+
+    @pytest.fixture
+    def sample_surrogates(self):
+        """Create sample surrogates for testing."""
+        from bot.services.artifact_service import (
+            TextSurrogateForContext,
+            ArtifactType,
+            TextSurrogateKind,
+        )
+
+        return [
+            TextSurrogateForContext(
+                artifact_id="artifact-1",
+                artifact_type=ArtifactType.IMAGE,
+                original_filename="photo.jpg",
+                text_kind=TextSurrogateKind.VISION_SUMMARY,
+                text_content="A photo of a cat",
+            ),
+            TextSurrogateForContext(
+                artifact_id="artifact-2",
+                artifact_type=ArtifactType.DOCUMENT,
+                original_filename="doc.pdf",
+                text_kind=TextSurrogateKind.FILE_SUMMARY,
+                text_content="Document about cats",
+            ),
+        ]
+
+    def test_build_with_surrogates(self, sample_surrogates):
+        """Test building part with surrogates."""
+        builder = ContextBuilder()
+
+        part = builder.build_artifact_surrogates_part(sample_surrogates)
+
+        assert part is not None
+        assert part.source == "artifact_surrogates"
+        assert "Attached files:" in part.content
+        assert "photo.jpg" in part.content
+        assert "doc.pdf" in part.content
+
+    def test_build_with_empty_surrogates(self):
+        """Test building part with empty surrogates."""
+        builder = ContextBuilder()
+
+        part = builder.build_artifact_surrogates_part([])
+
+        assert part is None
+
+    def test_build_with_none_surrogates(self):
+        """Test building part with None surrogates."""
+        builder = ContextBuilder()
+
+        part = builder.build_artifact_surrogates_part(None)
+
+        assert part is None
+
+    def test_build_with_dict_surrogates(self):
+        """Test building part with dict surrogates."""
+        builder = ContextBuilder()
+        surrogates = [
+            {
+                "artifact_id": "artifact-1",
+                "artifact_type": "image",
+                "original_filename": "photo.jpg",
+                "text_kind": "vision_summary",
+                "text_content": "A photo of a cat",
+            }
+        ]
+
+        part = builder.build_artifact_surrogates_part(surrogates)
+
+        assert part is not None
+        assert "[image: photo.jpg]" in part.content
+
+    def test_build_truncates_long_content(self):
+        """Test that long surrogate content is truncated."""
+        from bot.services.artifact_service import (
+            TextSurrogateForContext,
+            ArtifactType,
+            TextSurrogateKind,
+        )
+
+        config = ContextAssemblyConfig(
+            max_artifact_tokens=50,
+            tokens_per_char=1.0,  # Easy calculation
+        )
+        builder = ContextBuilder(config)
+
+        surrogates = [
+            TextSurrogateForContext(
+                artifact_id="artifact-1",
+                artifact_type=ArtifactType.IMAGE,
+                original_filename="photo.jpg",
+                text_kind=TextSurrogateKind.VISION_SUMMARY,
+                text_content="A" * 100,  # 100 chars = 100 tokens
+            ),
+        ]
+
+        part = builder.build_artifact_surrogates_part(surrogates)
+
+        assert part is not None
+        # Should be truncated
+        assert len(part.content) < 150
+        assert part.token_estimate <= config.max_artifact_tokens
+
+    def test_build_prioritizes_surrogates(self):
+        """Test that surrogates are included in priority order."""
+        from bot.services.artifact_service import (
+            TextSurrogateForContext,
+            ArtifactType,
+            TextSurrogateKind,
+        )
+
+        builder = ContextBuilder()
+
+        surrogates = [
+            TextSurrogateForContext(
+                artifact_id="artifact-1",
+                artifact_type=ArtifactType.IMAGE,
+                original_filename="first.jpg",
+                text_kind=TextSurrogateKind.VISION_SUMMARY,
+                text_content="First image",
+            ),
+            TextSurrogateForContext(
+                artifact_id="artifact-2",
+                artifact_type=ArtifactType.IMAGE,
+                original_filename="second.jpg",
+                text_kind=TextSurrogateKind.VISION_SUMMARY,
+                text_content="Second image",
+            ),
+        ]
+
+        part = builder.build_artifact_surrogates_part(surrogates)
+
+        assert part is not None
+        assert "first.jpg" in part.content
+        assert "second.jpg" in part.content
+
+
+class TestAssembleWithArtifactSurrogates:
+    """Tests for assemble with artifact surrogates."""
+
+    def test_assemble_includes_surrogates(self):
+        """Test that assemble includes artifact surrogates."""
+        from bot.services.artifact_service import (
+            TextSurrogateForContext,
+            ArtifactType,
+            TextSurrogateKind,
+        )
+
+        builder = ContextBuilder()
+
+        summary = RunningSummary(content="Summary here")
+        surrogates = [
+            TextSurrogateForContext(
+                artifact_id="artifact-1",
+                artifact_type=ArtifactType.IMAGE,
+                original_filename="photo.jpg",
+                text_kind=TextSurrogateKind.VISION_SUMMARY,
+                text_content="A photo of a cat",
+            ),
+        ]
+
+        result = builder.assemble(
+            summary=summary,
+            artifact_surrogates=surrogates,
+        )
+
+        assert "Summary here" in result
+        assert "A photo of a cat" in result
+        assert "Attached files:" in result
+
+    def test_assemble_order_with_surrogates(self):
+        """Test that surrogates appear in correct order."""
+        from bot.services.artifact_service import (
+            TextSurrogateForContext,
+            ArtifactType,
+            TextSurrogateKind,
+        )
+
+        config = ContextAssemblyConfig(order=["summary", "artifact_surrogates", "semantic_memory"])
+        builder = ContextBuilder(config)
+
+        summary = RunningSummary(content="SUMMARY")
+        surrogates = [
+            TextSurrogateForContext(
+                artifact_id="artifact-1",
+                artifact_type=ArtifactType.IMAGE,
+                original_filename="photo.jpg",
+                text_kind=TextSurrogateKind.VISION_SUMMARY,
+                text_content="SURROGATE",
+            ),
+        ]
+        memories = [MemoryFact(content="MEMORY", user_id=123)]
+
+        result = builder.assemble(
+            summary=summary,
+            artifact_surrogates=surrogates,
+            semantic_memories=memories,
+        )
+
+        # Check order: summary, then surrogates, then memories
+        summary_pos = result.find("SUMMARY")
+        surrogate_pos = result.find("SURROGATE")
+        memory_pos = result.find("MEMORY")
+
+        assert summary_pos < surrogate_pos < memory_pos
+
+
+class TestAssembleForLLMWithSurrogates:
+    """Tests for assemble_for_llm with artifact surrogates."""
+
+    def test_assemble_for_llm_includes_surrogates(self):
+        """Test that assemble_for_llm includes artifact surrogates."""
+        from bot.services.artifact_service import (
+            TextSurrogateForContext,
+            ArtifactType,
+            TextSurrogateKind,
+        )
+
+        builder = ContextBuilder()
+
+        summary = RunningSummary(content="Summary")
+        surrogates = [
+            TextSurrogateForContext(
+                artifact_id="artifact-1",
+                artifact_type=ArtifactType.IMAGE,
+                original_filename="photo.jpg",
+                text_kind=TextSurrogateKind.VISION_SUMMARY,
+                text_content="A photo of a cat",
+            ),
+        ]
+
+        messages = builder.assemble_for_llm(
+            summary=summary,
+            artifact_surrogates=surrogates,
+        )
+
+        # Find system context message
+        context_msgs = [m for m in messages if m["role"] == "system"]
+        assert len(context_msgs) >= 1
+
+        # Check that surrogates are in context
+        context_text = " ".join(m["content"] for m in context_msgs)
+        assert "A photo of a cat" in context_text
+        assert "Attached files:" in context_text

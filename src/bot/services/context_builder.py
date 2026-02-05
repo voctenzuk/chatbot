@@ -13,11 +13,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Optional
 
 from loguru import logger
 
-from bot.services.memory_models import MemoryFact, MemoryCategory, MemoryType
+from bot.services.memory_models import MemoryCategory, MemoryFact, MemoryType
 
 
 class MessageRole(Enum):
@@ -85,6 +85,11 @@ class ContextAssemblyConfig:
     max_semantic_memories: int = 5
     max_semantic_tokens: int = 1000
 
+    # Artifact surrogate limits
+    max_artifact_surrogates: int = 5
+    max_artifact_tokens: int = 800
+    max_surrogates_per_artifact: int = 2
+
     # Token estimation (approximate)
     tokens_per_char: float = 0.25
 
@@ -102,6 +107,7 @@ class ContextAssemblyConfig:
     order: list[str] = field(
         default_factory=lambda: [
             "summary",
+            "artifact_surrogates",
             "semantic_memory",
             "recent_messages",
         ]
@@ -386,11 +392,80 @@ class ContextBuilder:
             },
         )
 
+    def build_artifact_surrogates_part(
+        self,
+        surrogates: Optional[list[Any]],
+    ) -> ContextPart | None:
+        """Build context part from artifact text surrogates.
+
+        Args:
+            surrogates: List of text surrogates from artifacts (e.g.,
+                       TextSurrogateForContext from ArtifactService).
+
+        Returns:
+            ContextPart if surrogates exist, None otherwise.
+        """
+        if not surrogates:
+            return None
+
+        # Format surrogates
+        lines = []
+        for surrogate in surrogates:
+            # Handle TextSurrogateForContext or dict
+            if hasattr(surrogate, "to_context_string"):
+                lines.append(surrogate.to_context_string())
+            elif isinstance(surrogate, dict):
+                # Build from dict
+                artifact_type = surrogate.get("artifact_type", "file")
+                filename = surrogate.get("original_filename", "unnamed")
+                content = surrogate.get("text_content", "")
+                chunk_info = surrogate.get("chunk_info")
+
+                ref = f"[{artifact_type}: {filename}]"
+                if chunk_info:
+                    ref += f" ({chunk_info})"
+                lines.append(f"{ref} {content}")
+            else:
+                # Fallback: assume string
+                lines.append(str(surrogate))
+
+        header = "Attached files:\n"
+        content = header + "\n".join(f"- {line}" for line in lines)
+        token_estimate = self._estimate_tokens(content)
+
+        # Truncate if exceeds limit
+        if token_estimate > self.config.max_artifact_tokens:
+            max_chars = int(self.config.max_artifact_tokens / self.config.tokens_per_char)
+            # Try to keep complete surrogate entries
+            truncated_lines = []
+            current_chars = len(header)
+            for line in lines:
+                if current_chars + len(line) + 3 <= max_chars:  # +3 for "\n- "
+                    truncated_lines.append(line)
+                    current_chars += len(line) + 3
+                else:
+                    break
+            content = header + "\n".join(f"- {line}" for line in truncated_lines)
+            if len(truncated_lines) < len(lines):
+                content += "\n- ... (more files)"
+            token_estimate = self.config.max_artifact_tokens
+
+        return ContextPart(
+            content=content,
+            source="artifact_surrogates",
+            priority=8,  # High priority, after summary but before semantic
+            token_estimate=token_estimate,
+            metadata={
+                "surrogate_count": len(surrogates),
+            },
+        )
+
     def assemble(
         self,
         summary: RunningSummary | None = None,
         recent_messages: list[ConversationMessage] | None = None,
         semantic_memories: list[MemoryFact] | None = None,
+        artifact_surrogates: list[Any] | None = None,
         query: str | None = None,
     ) -> str:
         """Assemble complete context from all sources.
@@ -402,6 +477,7 @@ class ContextBuilder:
             summary: Optional running summary.
             recent_messages: Optional list of recent conversation messages.
             semantic_memories: Optional list of semantic memories from search.
+            artifact_surrogates: Optional list of artifact text surrogates.
             query: Optional search query for context.
 
         Returns:
@@ -412,6 +488,7 @@ class ContextBuilder:
             "summary": self.build_summary_part(summary),
             "recent_messages": self.build_recent_messages_part(recent_messages or []),
             "semantic_memory": self.build_semantic_memory_part(semantic_memories or [], query),
+            "artifact_surrogates": self.build_artifact_surrogates_part(artifact_surrogates or []),
         }
 
         # Order parts according to config
@@ -452,6 +529,7 @@ class ContextBuilder:
         summary: RunningSummary | None = None,
         recent_messages: list[ConversationMessage] | None = None,
         semantic_memories: list[MemoryFact] | None = None,
+        artifact_surrogates: list[Any] | None = None,
         query: str | None = None,
         system_prompt: str | None = None,
     ) -> list[dict[str, str]]:
@@ -461,6 +539,7 @@ class ContextBuilder:
             summary: Optional running summary.
             recent_messages: Optional list of recent conversation messages.
             semantic_memories: Optional list of semantic memories from search.
+            artifact_surrogates: Optional list of artifact text surrogates.
             query: Optional search query for context.
             system_prompt: Optional system prompt to prepend.
 
@@ -474,7 +553,9 @@ class ContextBuilder:
             messages.append({"role": "system", "content": system_prompt})
 
         # Assemble context as a system message
-        context = self.assemble(summary, recent_messages, semantic_memories, query)
+        context = self.assemble(
+            summary, recent_messages, semantic_memories, artifact_surrogates, query
+        )
         if context:
             context_header = "Relevant context for this conversation:\n\n"
             messages.append(
