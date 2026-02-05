@@ -1,26 +1,14 @@
-# Coding agent (Kimi K2.5) — workflow
+# Coding agent — minimal workflow
 
-## What this is
-A repeatable way to ask a **coding-focused agent** (model: **Kimi K2.5**) to implement tasks in this repo.
+> Coding agents: read this file first and follow it.
 
-## How to use (when working with Molter/OpenClaw)
-When you want code changes, write your request like:
-- Goal (what feature)
-- Constraints (libs: aiogram, LangChain/LangGraph, mem0)
-- Acceptance criteria (what must work)
-- Files/structure preferences
+## Request template
+When you ask for code changes, include:
+- Goal
+- Acceptance criteria
+- Constraints (libs/arch) + any file/structure preferences
 
-And explicitly say: **“Use Kimi K2.5 for coding”**.
-
-## Coding standards for this repo
-- Python 3.12, async-first
-- Strict per-user isolation: all keys based on Telegram `from_user.id`
-- No long-term memory writes without explicit user content (facts/preferences)
-- Images: generate only on explicit request (photo/selfie)
-- Logging: structured, no secrets
-
-## Typical tasks to delegate
-- Add new handlers and conversation flows
-- Implement LangGraph state machine and tool-calling
-- Integrate mem0 (add/search) with per-user namespace
-- Add image generation route + safe prompt builder
+## Rules of engagement
+- Create a new branch and **push early** so progress is visible.
+- Before opening a PR: run `ruff format .`, `ruff check .`, `pytest`.
+- Open a PR to `main` with `Closes #...` and leave a short summary comment.

@@ -11,10 +11,18 @@ ENV/
 # Testing
 .pytest_cache/
 .coverage
+coverage.xml
 htmlcov/
 
 # Ruff
 .ruff_cache/
+
+# Type checking
+.pyright/
+.mypy_cache/
+
+# Local scratch
+EOF
 
 # OS
 .DS_Store
