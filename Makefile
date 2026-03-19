@@ -1,8 +1,14 @@
 run:
-	python -m bot
+	uv run bot
 
 fmt:
-	ruff format .
+	uvx ruff format .
 
 lint:
-	ruff check .
+	uvx ruff check .
+
+test:
+	uv run pytest
+
+sync:
+	uv sync
