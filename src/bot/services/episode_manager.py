@@ -166,8 +166,18 @@ class EpisodeManager:
 
         # Check if we need to seed in-memory state from DB
         # This prevents unnecessary episode splits after restart when DB has active episode
-        if self._in_memory_manager._current_episode.get(user_id) is None and self.db:
-            await self._seed_in_memory_state_from_db(user_id)
+        # Re-seed if message counts differ (DB has messages not in memory, e.g., from external sources)
+        if self.db:
+            current_episode = self._in_memory_manager._current_episode.get(user_id)
+            db_episode = await self.db.get_active_episode_for_user(user_id)
+            if db_episode:
+                db_messages = await self.db.get_messages_for_episode(db_episode.id, limit=50)
+                if current_episode is None:
+                    # Cold start - seed from DB
+                    await self._seed_in_memory_state_from_db(user_id)
+                elif len(current_episode.messages) < len(db_messages):
+                    # DB has more messages than memory - re-seed to sync
+                    await self._seed_in_memory_state_from_db(user_id)
 
         # Get last message time from database
         if self.db:
