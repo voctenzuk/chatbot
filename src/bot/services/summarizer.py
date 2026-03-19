@@ -618,6 +618,9 @@ class Summarizer:
         facts = summary_result.summary_json.get_high_confidence_facts(threshold)
         return facts[: self.config.max_facts_per_summary]
 
+    # Compatibility alias for tests and legacy code (mem0→cognee refactor)
+    extract_facts_for_mem0 = extract_facts_for_memory
+
 
 # Global instance for dependency injection
 _summarizer: Summarizer | None = None
