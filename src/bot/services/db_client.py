@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Protocol
 from unittest.mock import MagicMock
 
@@ -635,6 +635,161 @@ class DatabaseClient:
         except Exception as e:
             logger.error("Failed to get summaries for episode {}: {}", episode_id, e)
             return []
+
+    async def check_rate_limit(self, telegram_user_id: int) -> bool:
+        """Check whether a user is within their rate limit.
+
+        Args:
+            telegram_user_id: Telegram user ID.
+
+        Returns:
+            True if the user is allowed to send a message.
+
+        Raises:
+            Exception: On database error (caller decides fail-open policy).
+        """
+        try:
+            response = self._client.rpc(
+                "check_rate_limit",
+                {"p_user_id": telegram_user_id},
+            ).execute()
+            return bool(response.data)
+        except Exception as e:
+            logger.error(
+                "Failed to check rate limit for user {}: {}",
+                telegram_user_id,
+                e,
+            )
+            raise
+
+    async def increment_usage(
+        self,
+        telegram_user_id: int,
+        msg_count: int = 1,
+        tokens_in: int = 0,
+        tokens_out: int = 0,
+        cost_cents: int = 0,
+    ) -> None:
+        """Increment usage counters for a user (fire-and-forget).
+
+        Args:
+            telegram_user_id: Telegram user ID.
+            msg_count: Number of messages to add.
+            tokens_in: Input tokens consumed.
+            tokens_out: Output tokens consumed.
+            cost_cents: Cost in cents to record.
+        """
+        try:
+            self._client.rpc(
+                "increment_usage",
+                {
+                    "p_user_id": telegram_user_id,
+                    "p_msg_count": msg_count,
+                    "p_tokens_input": tokens_in,
+                    "p_tokens_output": tokens_out,
+                    "p_cost_cents": cost_cents,
+                },
+            ).execute()
+        except Exception as e:
+            logger.warning(
+                "Failed to increment usage for user {}: {}",
+                telegram_user_id,
+                e,
+            )
+
+    async def provision_user(
+        self,
+        telegram_user_id: int,
+        username: str | None = None,
+        first_name: str | None = None,
+    ) -> None:
+        """Provision a new user with the free plan.
+
+        Args:
+            telegram_user_id: Telegram user ID.
+            username: Optional Telegram username.
+            first_name: Optional first name.
+        """
+        try:
+            self._client.rpc(
+                "provision_user_with_free_plan",
+                {
+                    "p_telegram_user_id": telegram_user_id,
+                    "p_username": username,
+                    "p_first_name": first_name,
+                },
+            ).execute()
+        except Exception as e:
+            logger.warning(
+                "Failed to provision user {}: {}",
+                telegram_user_id,
+                e,
+            )
+
+    async def activate_subscription(
+        self,
+        telegram_user_id: int,
+        plan_slug: str,
+    ) -> None:
+        """Activate a subscription for a user.
+
+        Looks up the plan by slug, cancels any existing active
+        subscriptions, and inserts a new 30-day subscription.
+
+        Args:
+            telegram_user_id: Telegram user ID.
+            plan_slug: Slug of the subscription plan to activate.
+
+        Raises:
+            Exception: On database error (payment handler needs to know).
+        """
+        try:
+            # Look up plan ID by slug
+            plan_response = (
+                self._client.table("subscription_plans")
+                .select("id")
+                .eq("slug", plan_slug)
+                .single()
+                .execute()
+            )
+            plan_id = plan_response.data["id"]
+
+            # Cancel existing active subscriptions
+            (
+                self._client.table("user_subscriptions")
+                .update({"status": "canceled"})
+                .eq("user_id", telegram_user_id)
+                .eq("status", "active")
+                .execute()
+            )
+
+            # Insert new subscription with 30-day period
+            now = datetime.utcnow()
+            period_end = now + timedelta(days=30)
+            provider_sub_id = f"tg_stars_{telegram_user_id}_{now.timestamp():.0f}"
+
+            (
+                self._client.table("user_subscriptions")
+                .insert(
+                    {
+                        "user_id": telegram_user_id,
+                        "plan_id": plan_id,
+                        "status": "active",
+                        "provider": "telegram_stars",
+                        "provider_subscription_id": provider_sub_id,
+                        "current_period_start": now.isoformat(),
+                        "current_period_end": period_end.isoformat(),
+                    }
+                )
+                .execute()
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to activate subscription for user {}: {}",
+                telegram_user_id,
+                e,
+            )
+            raise
 
 
 # Global instance for dependency injection
