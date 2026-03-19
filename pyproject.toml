@@ -24,6 +24,8 @@ dependencies = [
   "cognee>=0.1.21",
   # Optional: storage
   "redis>=5.0",
+  # Proactive messaging scheduler
+  "apscheduler>=3.10",
   # Database (Supabase)
   "supabase>=2.0",
   # Math/ML utilities
