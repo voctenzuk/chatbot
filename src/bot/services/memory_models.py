@@ -121,8 +121,8 @@ class MemoryFact:
         access_boost = min(self.access_count * 0.05, 0.3)
         return min(decayed + access_boost, 2.0)
 
-    def to_mem0_metadata(self) -> dict[str, Any]:
-        """Convert to Mem0-compatible metadata."""
+    def to_metadata(self) -> dict[str, Any]:
+        """Convert to metadata dictionary for memory storage."""
         return {
             "memory_type": self.memory_type.value,
             "memory_category": self.memory_category.value,
@@ -143,8 +143,8 @@ class MemoryFact:
         }
 
     @classmethod
-    def from_mem0_result(cls, result: dict[str, Any], user_id: int) -> "MemoryFact":
-        """Create MemoryFact from Mem0 search result."""
+    def from_search_result(cls, result: dict[str, Any], user_id: int) -> "MemoryFact":
+        """Create MemoryFact from memory search result."""
         metadata = result.get("metadata", {})
         created_at = result.get("created_at")
 

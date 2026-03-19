@@ -11,7 +11,7 @@ the existing DB/schema patterns in the codebase.
 
 Usage:
     # Run cleanup in dry-run mode (safe preview)
-    service = MemoryCleanupService(mem0_service)
+    service = MemoryCleanupService(memory_service)
     report = await service.cleanup_all(dry_run=True)
 
     # Run actual cleanup
@@ -35,7 +35,7 @@ from typing import Any, Protocol
 
 from loguru import logger
 
-from bot.services.mem0_memory_service import Mem0MemoryService
+from bot.services.cognee_memory_service import CogneeMemoryService
 from bot.services.memory_models import MemoryCategory, MemoryFact, MemoryType
 
 
@@ -230,7 +230,7 @@ class MemoryCleanupService:
     - Safe dry-run mode for testing
 
     Example:
-        >>> service = MemoryCleanupService(mem0_service)
+        >>> service = MemoryCleanupService(memory_service)
         >>> # Preview what would be cleaned
         >>> report = await service.cleanup_user(12345, dry_run=True)
         >>> # Actually clean
@@ -239,13 +239,13 @@ class MemoryCleanupService:
 
     def __init__(
         self,
-        memory_service: Mem0MemoryService | MemoryServiceProtocol | None = None,
+        memory_service: CogneeMemoryService | MemoryServiceProtocol | None = None,
         config: CleanupConfig | None = None,
     ) -> None:
         """Initialize the cleanup service.
 
         Args:
-            memory_service: Mem0MemoryService instance or compatible protocol
+            memory_service: CogneeMemoryService instance or compatible protocol
             config: CleanupConfig with tuning parameters (uses defaults if None)
         """
         self.memory_service = memory_service
@@ -438,9 +438,7 @@ class MemoryCleanupService:
                 deletion_count = 0
                 for memory_id in to_delete[: self.config.max_deletions_per_run]:
                     try:
-                        # Note: mem0 OSS API may not support single memory deletion
-                        # This is a placeholder for the actual deletion logic
-                        # In practice, we might need to use a different approach
+                        # Placeholder for actual deletion logic via cognee API
                         logger.debug("Would delete memory {}", memory_id)
                         deletion_count += 1
                     except Exception as e:
@@ -487,7 +485,7 @@ class MemoryCleanupService:
             dry_run = self.config.dry_run_default
 
         # For now, we require explicit user_ids since we don't have a way
-        # to list all users from mem0. In production, this might come from
+        # to list all users from cognee. In production, this might come from
         # a users table or other source.
         if not user_ids:
             logger.warning("No user_ids provided for cleanup_all")
@@ -550,12 +548,12 @@ _cleanup_service: MemoryCleanupService | None = None
 
 
 def get_cleanup_service(
-    memory_service: Mem0MemoryService | None = None,
+    memory_service: CogneeMemoryService | None = None,
 ) -> MemoryCleanupService:
     """Get or create global cleanup service instance.
 
     Args:
-        memory_service: Optional Mem0MemoryService to use
+        memory_service: Optional CogneeMemoryService to use
 
     Returns:
         MemoryCleanupService instance

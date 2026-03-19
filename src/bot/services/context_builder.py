@@ -4,7 +4,7 @@ This module provides the ContextBuilder class that assembles prompts from multip
 memory sources:
 - Running summary (long-term conversation summary)
 - Last N messages (recent conversation history)
-- mem0.search results (top-K semantic memories)
+- Memory search results (top-K semantic memories)
 - Pruning based on relevance, size limits, and metadata filters
 """
 
@@ -337,7 +337,7 @@ class ContextBuilder:
         """Build context part from semantic memories.
 
         Args:
-            memories: List of semantic memories from mem0.search.
+            memories: List of semantic memories from memory service search.
             query: Optional search query for context.
 
         Returns:

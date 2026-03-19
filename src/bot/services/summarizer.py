@@ -4,7 +4,7 @@ This module provides the Summarizer class that generates:
 - Running summaries (incremental updates during conversations)
 - Final episode summaries (structured JSON format with facts_candidates)
 
-The service extracts facts_candidates for mem0 integration as specified in
+The service extracts facts_candidates for memory integration as specified in
 ARCHITECTURE/MEMORY_DESIGN.md.
 """
 
@@ -73,9 +73,9 @@ class SummaryKind(Enum):
 
 @dataclass
 class FactCandidate:
-    """A candidate fact for mem0 extraction.
+    """A candidate fact for memory extraction.
 
-    Represents a potential memory unit that could be stored in mem0.
+    Represents a potential memory unit that could be stored in the memory service.
     Includes confidence score for filtering.
     """
 
@@ -134,7 +134,7 @@ class SummaryJSON:
     topic: str = ""  # Main topic of the episode
     decisions: list[str] = field(default_factory=list)  # Decisions made
     todos: list[str] = field(default_factory=list)  # Open todos/goals
-    facts_candidates: list[FactCandidate] = field(default_factory=list)  # For mem0
+    facts_candidates: list[FactCandidate] = field(default_factory=list)  # For memory service
     entities: list[str] = field(default_factory=list)  # People, places, things
     artifacts: list[ArtifactReference] = field(default_factory=list)  # Attachments
     open_questions: list[str] = field(default_factory=list)  # Unresolved questions
@@ -266,7 +266,7 @@ class Summarizer:
     Features:
     - Running summaries: Incremental updates during active conversations
     - Chunk summaries: Periodic summaries for long episodes
-    - Final summaries: Structured JSON output with facts_candidates for mem0
+    - Final summaries: Structured JSON output with facts_candidates for memory storage
     """
 
     def __init__(
@@ -375,7 +375,7 @@ class Summarizer:
     ) -> SummaryResult:
         """Generate a final episode summary with structured JSON.
 
-        Creates a comprehensive summary with facts_candidates for mem0 extraction.
+        Creates a comprehensive summary with facts_candidates for memory extraction.
 
         Args:
             messages: All messages from the episode
@@ -597,12 +597,12 @@ class Summarizer:
         messages_since_last = message_count - last_chunk_message_count
         return messages_since_last >= self.config.chunk_summary_interval
 
-    def extract_facts_for_mem0(
+    def extract_facts_for_memory(
         self,
         summary_result: SummaryResult,
         min_confidence: float | None = None,
     ) -> list[FactCandidate]:
-        """Extract high-confidence facts for mem0 storage.
+        """Extract high-confidence facts for memory storage.
 
         Args:
             summary_result: Summary result with facts_candidates
