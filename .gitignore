@@ -43,8 +43,8 @@ node_modules/
 # Architecture docs (generated)
 ARCHITECTURE/
 
-# Agents (generated)
-agents/
+# Agents (generated, top-level only)
+/agents/
 
 # Lock files
 uv.lock

@@ -24,6 +24,8 @@ CI gate (all must pass before merge): `ruff format --check .`, `ruff check .`, `
 
 **Entry point:** `src/bot/__main__.py` → `app.run()` → `Dispatcher.start_polling()`
 
+**Configuration:** `src/bot/config.py` — single `Settings(BaseSettings)` instance, reads `.env` file. Imported as `from bot.config import settings`.
+
 **Request flow** (per user message in `handlers.py`):
 1. `EpisodeManager.process_user_message()` — persists message, auto-switches episodes on 8h gap or topic shift (cosine similarity < 0.7)
 2. `CogneeMemoryService.search()` — vector similarity search over knowledge graph (best-effort, skipped if unavailable)
@@ -42,10 +44,40 @@ CI gate (all must pass before merge): `ruff format --check .`, `ruff check .`, `
 | `cognee_memory_service.py` | Long-term memory via Cognee knowledge graph + vector search |
 | `context_builder.py` | Dual-memory (short-term + semantic) prompt assembly |
 | `episode_manager.py` | Episode lifecycle, DB persistence, delegates to `episode_switcher` |
-| `episode_switcher.py` | Time-gap and topic-shift detection (numpy cosine similarity) |
 | `db_client.py` | Supabase client for threads/episodes/messages |
-| `summarizer.py` | Episode summary generation for long-term memory extraction |
-| `artifact_service.py` | File uploads + text surrogate management |
+| `system_prompt.py` | Bot persona system prompt with user-name personalization |
+| `memory_models.py` | Memory category/type enums + `MemoryUnit` data models |
+
+## Critical Rules
+
+<important if="writing async code or service methods">
+All service methods MUST be async. Use `ainvoke()` / `astream()` for LangChain, never sync `.invoke()`.
+</important>
+
+<important if="writing handlers or touching handlers.py">
+The catch-all `@router.message()` handler with NO filter MUST be registered LAST. Insert new handlers ABOVE it. Always include try/except with Russian fallback text.
+</important>
+
+<important if="working with Cognee or memory">
+All `cognee.add()` calls MUST include `dataset_name=f"tg_user_{user_id}"` for user isolation. Never call `prune_data()`.
+</important>
+
+<important if="writing imports from LangChain">
+Use split packages only: `langchain_core`, `langchain_openai`. Never `from langchain.` or `from langchain.schema`.
+</important>
+
+## Environment
+
+Required env vars (loaded via `.env` by pydantic-settings):
+
+| Variable | Required | Notes |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | Yes | Bot crashes on startup without it |
+| `LLM_BASE_URL` | No | LLM provider endpoint (defaults to OpenAI) |
+| `LLM_API_KEY` | No | API key for LLM provider |
+| `REDIS_URL` | No | Redis for rate-limiting; falls back gracefully |
+| `COGNEE_VECTOR_DB_PROVIDER` | No | Default `lancedb` |
+| `COGNEE_GRAPH_DB_PROVIDER` | No | Default `kuzu` |
 
 ## Code Style
 
@@ -59,3 +91,9 @@ CI gate (all must pass before merge): `ruff format --check .`, `ruff check .`, `
 
 - `main` — production. `develop` — integration. Feature branches: `feature/<name>`, bugfix: `fix/<name>`
 - Squash or rebase merge preferred
+
+## Claude Code Tooling
+
+Commands: `/implement`, `/ship`, `/add-feature`, `/check`, `/review`
+Agents: `planner`, `memory-specialist`, `llm-pipeline`, `telegram-handler`, `tester`, `reviewer`, `security-reviewer`, `prompt-engineer`
+Skills: `add-migration`, `add-service`, `add-handler`, `prompt-review`, `diagnose`

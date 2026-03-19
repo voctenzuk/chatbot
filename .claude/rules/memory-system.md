@@ -1,3 +1,12 @@
+---
+paths:
+  - "src/bot/services/cognee_memory_service.py"
+  - "src/bot/services/episode_manager.py"
+  - "src/bot/services/episode_switcher.py"
+  - "src/bot/services/context_builder.py"
+  - "src/bot/services/memory_*.py"
+---
+
 # Memory system (Cognee + episodes)
 
 ## Dual-layer architecture

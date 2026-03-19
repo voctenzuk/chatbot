@@ -1,3 +1,8 @@
+---
+paths:
+  - "tests/**/*.py"
+---
+
 # Testing conventions
 
 Project uses `asyncio_mode = "auto"` (pyproject.toml), but we still decorate with `@pytest.mark.asyncio` for explicitness.

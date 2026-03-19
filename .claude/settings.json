@@ -1,5 +1,16 @@
 {
   "permissions": {
+    "allow": [
+      "Bash(uv run *)",
+      "Bash(uv sync*)",
+      "Bash(uvx ruff *)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git branch*)"
+    ],
     "deny": [
       "Read(./.env)",
       "Read(./.env.*)",

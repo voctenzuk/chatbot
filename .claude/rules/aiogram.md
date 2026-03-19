@@ -1,3 +1,10 @@
+---
+paths:
+  - "src/bot/handlers.py"
+  - "src/bot/app.py"
+  - "src/bot/middlewares/**"
+---
+
 # aiogram 3.x patterns
 
 This project uses aiogram 3.x with Router-based handler organization and long-polling (`dp.start_polling(bot)`).

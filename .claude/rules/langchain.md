@@ -1,3 +1,10 @@
+---
+paths:
+  - "src/bot/services/llm_service.py"
+  - "src/bot/services/summarizer.py"
+  - "src/bot/services/context_builder.py"
+---
+
 # LangChain integration
 
 This project uses `langchain-core>=0.2`, `langchain-openai>=0.1`, and `langgraph>=0.2`.
