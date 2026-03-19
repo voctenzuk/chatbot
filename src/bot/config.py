@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     llm_model: str = "kimi-k2p5"
+    llm_temperature: float = 0.7
+    llm_max_tokens: int = 1024
 
     cognee_vector_db_provider: str = "lancedb"
     cognee_graph_db_provider: str = "kuzu"

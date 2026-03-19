@@ -171,6 +171,30 @@ except ImportError:
     get_storage_backend = None  # type: ignore
     set_storage_backend = None  # type: ignore
 
+# System Prompt
+try:
+    from bot.services.system_prompt import (
+        DEFAULT_SYSTEM_PROMPT,
+        get_system_prompt,
+    )
+except ImportError:
+    DEFAULT_SYSTEM_PROMPT = None  # type: ignore
+    get_system_prompt = None  # type: ignore
+
+# LLM Service
+try:
+    from bot.services.llm_service import (
+        LLMResponse,
+        LLMService,
+        get_llm_service,
+        set_llm_service,
+    )
+except ImportError:
+    LLMResponse = None  # type: ignore
+    LLMService = None  # type: ignore
+    get_llm_service = None  # type: ignore
+    set_llm_service = None  # type: ignore
+
 __all__ = [
     # Episode Manager Service
     "EpisodeManager",
@@ -240,4 +264,12 @@ __all__ = [
     "StorageReference",
     "get_storage_backend",
     "set_storage_backend",
+    # System Prompt
+    "DEFAULT_SYSTEM_PROMPT",
+    "get_system_prompt",
+    # LLM Service
+    "LLMResponse",
+    "LLMService",
+    "get_llm_service",
+    "set_llm_service",
 ]
