@@ -10,8 +10,8 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     llm_model: str = "kimi-k2p5"
 
-    mem0_api_key: str | None = None
-    mem0_project_id: str | None = None
+    cognee_vector_db_provider: str = "lancedb"
+    cognee_graph_db_provider: str = "kuzu"
 
     redis_url: str | None = None
 
