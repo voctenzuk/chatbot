@@ -7,7 +7,7 @@ from datetime import datetime
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import LabeledPrice, Message, PreCheckoutQuery
+from aiogram.types import BufferedInputFile, LabeledPrice, Message, PreCheckoutQuery
 from loguru import logger
 
 from bot.services.context_builder import (
@@ -40,9 +40,22 @@ except ImportError:
     get_db_client = None  # type: ignore
     DB_CLIENT_AVAILABLE = False
 
+try:
+    from bot.services.image_service import extract_photo_prompt, get_image_service
+
+    IMAGE_SERVICE_AVAILABLE = True
+except ImportError:
+    extract_photo_prompt = None  # type: ignore[assignment]
+    get_image_service = None  # type: ignore[assignment]
+    IMAGE_SERVICE_AVAILABLE = False
+
 router = Router()
 
 _LLM_FALLBACK = "Прости, у меня сейчас не получается ответить. Попробуй ещё раз чуть позже."
+_PHOTO_INSTRUCTION = (
+    "\nЕсли хочешь отправить фото — добавь маркер [SEND_PHOTO: описание фото на английском] "
+    "в свой ответ. Используй это редко и уместно: селфи, фото еды, виды из окна и т.д."
+)
 _ROLE_MAP = {
     "user": MessageRole.USER,
     "assistant": MessageRole.ASSISTANT,
@@ -131,6 +144,8 @@ async def _generate_llm_response(
 
     # 3. Assemble LLM messages via context builder
     system_prompt = get_system_prompt(user_name=user_name)
+    if IMAGE_SERVICE_AVAILABLE:
+        system_prompt += _PHOTO_INSTRUCTION
     llm_messages = get_context_builder().assemble_for_llm(
         recent_messages=recent_messages,
         semantic_memories=memories,
@@ -337,7 +352,29 @@ async def chat(message: Message) -> None:
             except Exception as exc:
                 logger.warning("Memory write failed for user {}: {}", user_id, exc)
 
-        await message.answer(response)
+        # Check for photo marker and send image if present
+        photo_sent = False
+        if (
+            IMAGE_SERVICE_AVAILABLE
+            and extract_photo_prompt is not None
+            and llm_response is not None
+        ):
+            try:
+                cleaned_text, photo_prompt = extract_photo_prompt(response)
+                if photo_prompt and get_image_service is not None:
+                    image_bytes = await get_image_service().generate(photo_prompt, user_id)
+                    if image_bytes is not None:
+                        if cleaned_text:
+                            await message.answer(cleaned_text)
+                        await message.answer_photo(
+                            photo=BufferedInputFile(image_bytes, filename="photo.png"),
+                        )
+                        photo_sent = True
+            except Exception as img_exc:
+                logger.warning("Image handling failed for user {}: {}", user_id, img_exc)
+
+        if not photo_sent:
+            await message.answer(response)
 
     except EpisodeManagerUnavailableError as e:
         logger.error("Episode manager unavailable for user {}: {}", user_id, e)

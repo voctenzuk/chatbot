@@ -248,7 +248,7 @@ class TestChatLLMIntegration:
         cb = patched_handlers["context_builder"]
         call_kwargs = cb.assemble_for_llm.call_args.kwargs
         assert "system_prompt" in call_kwargs
-        assert call_kwargs["system_prompt"] == "You are a helpful assistant."
+        assert call_kwargs["system_prompt"].startswith("You are a helpful assistant.")
 
 
 class TestStartHandlerUnchanged:
