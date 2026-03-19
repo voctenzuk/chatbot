@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from aiogram import Router
-from aiogram.filters import CommandStart
-from aiogram.types import Message
+from aiogram import F, Router
+from aiogram.filters import Command, CommandStart
+from aiogram.types import LabeledPrice, Message, PreCheckoutQuery
 from loguru import logger
 
 from bot.services.context_builder import (
@@ -141,10 +141,22 @@ async def _generate_llm_response(
 async def start(message: Message) -> None:
     """Handle /start command."""
     user_id = message.from_user.id if message.from_user else 0
+    user_name = getattr(message.from_user, "first_name", None) if message.from_user else None
 
     try:
         episode_manager = await get_episode_manager_service()
         await episode_manager.process_user_message(user_id=user_id, content="/start")
+
+        # Provision user in DB with Free plan
+        if DB_CLIENT_AVAILABLE and get_db_client is not None:
+            try:
+                db = get_db_client()
+                username = (
+                    getattr(message.from_user, "username", None) if message.from_user else None
+                )
+                await db.provision_user(user_id, username=username, first_name=user_name)
+            except Exception as e:
+                logger.warning("Failed to provision user {}: {}", user_id, e)
 
         response = "Привет. Я рядом 🙂\nРасскажи, как тебя зовут?"
         await episode_manager.process_assistant_message(user_id=user_id, content=response)
@@ -159,6 +171,53 @@ async def start(message: Message) -> None:
     except Exception as e:
         logger.error("Error in start handler for user {}: {}", user_id, e)
         await message.answer("Привет. Я рядом 🙂\nРасскажи, как тебя зовут?")
+
+
+@router.message(Command("upgrade"))
+async def upgrade(message: Message) -> None:
+    """Show subscription upgrade options via Telegram Stars."""
+    await message.answer_invoice(
+        title="Plus подписка",
+        description="100 сообщений в день + фото. 30 дней.",
+        payload="plan:plus",
+        currency="XTR",
+        prices=[LabeledPrice(label="Plus (30 дней)", amount=385)],
+    )
+
+
+@router.pre_checkout_query()
+async def pre_checkout(query: PreCheckoutQuery) -> None:
+    """Validate payment before processing."""
+    payload = query.invoice_payload or ""
+    if payload.startswith("plan:"):
+        await query.answer(ok=True)
+    else:
+        await query.answer(ok=False, error_message="Неизвестный тип оплаты")
+
+
+@router.message(F.successful_payment)
+async def successful_payment(message: Message) -> None:
+    """Handle successful Telegram Stars payment."""
+    user_id = message.from_user.id if message.from_user else 0
+    payment = message.successful_payment
+    if not payment:
+        return
+
+    payload = payment.invoice_payload or ""
+    plan_slug = payload.replace("plan:", "") if payload.startswith("plan:") else None
+
+    if plan_slug and DB_CLIENT_AVAILABLE and get_db_client is not None:
+        try:
+            db = get_db_client()
+            await db.activate_subscription(user_id, plan_slug)
+            await message.answer("Подписка активирована! Спасибо 💕")
+        except Exception as e:
+            logger.error("Failed to activate subscription for user {}: {}", user_id, e)
+            await message.answer(
+                "Оплата получена, но произошла ошибка. Напиши /start и попробуй снова."
+            )
+    else:
+        await message.answer("Оплата получена! Спасибо 💕")
 
 
 @router.message()
@@ -182,6 +241,20 @@ async def chat(message: Message) -> None:
             result.is_new_episode,
             result.switch_decision.reason,
         )
+
+        # Check rate limit (fail open on errors)
+        if DB_CLIENT_AVAILABLE and get_db_client is not None:
+            try:
+                db = get_db_client()
+                allowed = await db.check_rate_limit(user_id)
+                if not allowed:
+                    await message.answer(
+                        "Сегодня лимит сообщений исчерпан 😔\n"
+                        "Напиши /upgrade чтобы увеличить лимит."
+                    )
+                    return
+            except Exception as exc:
+                logger.warning("Rate limit check failed for user {}, allowing: {}", user_id, exc)
 
         # Generate LLM response
         try:
@@ -211,6 +284,25 @@ async def chat(message: Message) -> None:
                 user_id=user_id,
                 content=response,
             )
+
+        # Track usage (fire-and-forget)
+        if DB_CLIENT_AVAILABLE and get_db_client is not None and llm_response is not None:
+            try:
+                from bot.services.llm_service import estimate_cost_cents
+
+                db = get_db_client()
+                cost = estimate_cost_cents(
+                    llm_response.model, llm_response.tokens_in, llm_response.tokens_out
+                )
+                await db.increment_usage(
+                    user_id,
+                    msg_count=1,
+                    tokens_in=llm_response.tokens_in,
+                    tokens_out=llm_response.tokens_out,
+                    cost_cents=cost,
+                )
+            except Exception as exc:
+                logger.warning("Usage tracking failed for user {}: {}", user_id, exc)
 
         await message.answer(response)
 
