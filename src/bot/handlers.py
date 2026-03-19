@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 
 from aiogram import F, Router
@@ -47,6 +48,10 @@ _ROLE_MAP = {
     "assistant": MessageRole.ASSISTANT,
     "system": MessageRole.SYSTEM,
 }
+
+# Counter for scheduling periodic cognify() calls
+_memory_write_counts: dict[int, int] = {}
+_COGNIFY_EVERY_N_WRITES: int = 10
 
 
 class EpisodeManagerUnavailableError(Exception):
@@ -135,6 +140,16 @@ async def _generate_llm_response(
 
     # 4. Call LLM
     return await get_llm_service().generate(llm_messages)
+
+
+async def _run_cognify_background() -> None:
+    """Run cognify in background to build knowledge graph. Fire-and-forget."""
+    try:
+        if MEMORY_SERVICE_AVAILABLE and get_memory_service is not None:
+            await get_memory_service().cognify()
+            logger.info("Background cognify completed successfully")
+    except Exception as exc:
+        logger.warning("Background cognify failed: {}", exc)
 
 
 @router.message(CommandStart())
@@ -303,6 +318,24 @@ async def chat(message: Message) -> None:
                 )
             except Exception as exc:
                 logger.warning("Usage tracking failed for user {}: {}", user_id, exc)
+
+        # Write conversation to long-term memory (fire-and-forget)
+        if MEMORY_SERVICE_AVAILABLE and get_memory_service is not None and llm_response is not None:
+            try:
+                mem_service = get_memory_service()
+                memory_content = f"Пользователь: {content}\nПодруга: {response}"
+                await mem_service.write_factual(
+                    content=memory_content,
+                    user_id=user_id,
+                )
+
+                # Schedule cognify() periodically to build knowledge graph
+                _memory_write_counts[user_id] = _memory_write_counts.get(user_id, 0) + 1
+                if _memory_write_counts[user_id] >= _COGNIFY_EVERY_N_WRITES:
+                    _memory_write_counts[user_id] = 0
+                    asyncio.create_task(_run_cognify_background())
+            except Exception as exc:
+                logger.warning("Memory write failed for user {}: {}", user_id, exc)
 
         await message.answer(response)
 
