@@ -38,9 +38,7 @@ node_modules/
 
 # Claude tooling
 .claude-flow/
-.claude/
 .swarm/
-.mcp.json
 
 # Architecture docs (generated)
 ARCHITECTURE/
@@ -50,3 +48,4 @@ agents/
 
 # Lock files
 uv.lock
+.gstack/

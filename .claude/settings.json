@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Bash(git push --force*)",
+      "Bash(git reset --hard*)",
+      "Bash(rm -rf *)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[[ \"$CLAUDE_FILE_PATH\" == *.py ]] && uvx ruff check --fix \"$CLAUDE_FILE_PATH\" && uvx ruff format \"$CLAUDE_FILE_PATH\" || true",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

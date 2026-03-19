@@ -1,89 +1,61 @@
-# tg-virtual-girlfriend
+# CLAUDE.md
 
-Telegram-бот (aiogram 3.x) с LLM-интеграцией, cognee knowledge graph memory и Supabase.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Stack
+## Project
 
-- **Python**: 3.12+
-- **Bot framework**: aiogram 3.x
-- **LLM**: LangChain-core + LangGraph (модель через OpenAI-compatible API)
-- **Memory**: cognee (lancedb vectors + kuzu graph)
-- **Database**: Supabase (episodes, messages)
-- **Cache**: Redis
-- **Config**: pydantic-settings (`.env`)
+Telegram AI companion chatbot built with aiogram 3 (async, long-polling), LangChain for LLM orchestration, and Cognee for knowledge-graph memory. Bot personality is Russian-language. Package manager is **uv**.
 
-## Python Toolchain (MANDATORY)
-
-- **ALWAYS** use `uv` — NEVER `pip`, `pip install`, `python -m pip`, or bare `python`
-- `uv sync` — install deps from pyproject.toml / uv.lock
-- `uv add <pkg>` — add dependency (NOT `pip install`, NOT `uv pip install`)
-- `uv run <script>` — run Python scripts
-- `uvx <tool>` — one-off CLI tools (ruff, pytest, mypy)
-- Applies everywhere: local dev, CI, scripts, agents
-
-## Build & Test
+## Commands
 
 ```bash
-uv sync                       # install dependencies
-uv run pytest                 # run tests
-uv run pytest --cov           # tests + coverage
-uvx ruff check .              # lint
-uvx ruff format .             # format
-uvx pyright                   # type check
-uv run bot                    # start bot (entry: bot.__main__:main)
+uv run bot                                    # run the bot
+uv sync                                       # install/sync dependencies
+uvx ruff format .                             # format code
+uvx ruff check .                              # lint
+uv run pyright                                # type check
+uv run pytest                                 # run all tests
+uv run pytest tests/test_foo.py::test_bar -v  # run a single test
 ```
 
-## Project Structure
+CI gate (all must pass before merge): `ruff format --check .`, `ruff check .`, `pyright`, `pytest`
 
-```
-src/bot/
-├── app.py              # Bot + Dispatcher setup
-├── config.py           # pydantic-settings (Settings)
-├── handlers.py         # aiogram Router: /start + chat
-├── webhooks.py         # Optional: FastAPI webhooks (stripe, paddle)
-├── __main__.py         # Entry point
-└── services/
-    ├── llm_service.py          # LLM client (OpenAI-compatible)
-    ├── cognee_memory_service.py # Cognee knowledge graph
-    ├── context_builder.py       # Assemble system + history + memories
-    ├── episode_manager.py       # Episode lifecycle + message persistence
-    ├── episode_switcher.py      # Episode switching logic
-    ├── db_client.py             # Supabase client
-    ├── storage_backend.py       # Abstracted storage
-    ├── summarizer.py            # Conversation summarization
-    ├── system_prompt.py         # System prompt builder
-    ├── artifact_service.py      # Artifacts pipeline
-    └── memory_models.py         # Pydantic models for memory
-tests/                  # pytest + pytest-asyncio (asyncio_mode=auto)
-supabase_migrations/    # SQL migrations
-prompts/                # Prompt templates
-```
+## Architecture
 
-## Behavioral Rules
+**Entry point:** `src/bot/__main__.py` → `app.run()` → `Dispatcher.start_polling()`
 
-- Do what was asked; nothing more, nothing less
-- NEVER create files unless absolutely necessary — prefer editing existing
-- NEVER save files to root — use `src/`, `tests/`, `docs/`, `scripts/`
-- ALWAYS read a file before editing it
-- NEVER commit secrets, credentials, or .env files
-- ALWAYS run `uv run pytest` after code changes
-- ALWAYS use Context7 MCP to look up aiogram, langchain, cognee, supabase docs before writing code
+**Request flow** (per user message in `handlers.py`):
+1. `EpisodeManager.process_user_message()` — persists message, auto-switches episodes on 8h gap or topic shift (cosine similarity < 0.7)
+2. `CogneeMemoryService.search()` — vector similarity search over knowledge graph (best-effort, skipped if unavailable)
+3. `ContextBuilder.assemble_for_llm()` — merges short-term history (last N messages) + semantic memories + system prompt into an LLM message list
+4. `LLMService.generate()` — calls LLM via LangChain `ChatOpenAI` wrapper, returns `LLMResponse` with content + token counts
+5. Response persisted to episode, sent back to user
 
-## Documentation Lookup
+**Service wiring:** module-level singletons via `get_*()` / `set_*()` factory functions (e.g. `get_llm_service()`, `get_episode_manager()`).
 
-- First: `mcp__context7__resolve-library-id` (e.g., "aiogram", "langchain", "cogneeai", "supabase")
-- Then: `mcp__context7__query-docs` with resolved ID
-- Priority libs: aiogram 3.x, LangChain/LangGraph, cognee, Supabase Python, Pydantic v2
+**Graceful degradation:** Cognee memory, Supabase DB, and Redis are all optional — the bot falls back to in-memory-only operation when any is missing. Handlers catch service-level exceptions and reply with Russian fallback text.
 
-## Security
+**Key services** (all in `src/bot/services/`):
+| Service | Role |
+|---|---|
+| `llm_service.py` | LangChain ChatOpenAI wrapper, token tracking |
+| `cognee_memory_service.py` | Long-term memory via Cognee knowledge graph + vector search |
+| `context_builder.py` | Dual-memory (short-term + semantic) prompt assembly |
+| `episode_manager.py` | Episode lifecycle, DB persistence, delegates to `episode_switcher` |
+| `episode_switcher.py` | Time-gap and topic-shift detection (numpy cosine similarity) |
+| `db_client.py` | Supabase client for threads/episodes/messages |
+| `summarizer.py` | Episode summary generation for long-term memory extraction |
+| `artifact_service.py` | File uploads + text surrogate management |
 
-- NEVER hardcode API keys or credentials
-- NEVER commit `.env`
-- Validate user input at system boundaries
-- Sanitize file paths
+## Code Style
 
-## Git Workflow
+- Python 3.12+ features encouraged
+- Type hints required on public functions
+- 100-char line length (ruff config)
+- Async-first: all service methods are `async`
+- Commits: present tense, concise ("Add feature" not "Added feature")
 
-- Main branch: `memory/issue-1-schema`
-- Feature branches off main
-- Pre-commit: ruff (lint + format), trailing whitespace, YAML check, merge conflict check
+## Branching
+
+- `main` — production. `develop` — integration. Feature branches: `feature/<name>`, bugfix: `fix/<name>`
+- Squash or rebase merge preferred
