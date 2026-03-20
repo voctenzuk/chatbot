@@ -24,7 +24,7 @@ async def _amain() -> None:
     # Start proactive scheduler (best-effort)
     scheduler = None
     try:
-        from bot.services.proactive_scheduler import ProactiveScheduler, set_proactive_scheduler
+        from bot.adapters.proactive_scheduler import ProactiveScheduler, set_proactive_scheduler
 
         from bot.adapters import TelegramDelivery
 
