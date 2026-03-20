@@ -1,5 +1,7 @@
 """Tests for Summarizer service."""
 
+from __future__ import annotations
+
 import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock
@@ -689,6 +691,20 @@ class TestGenerateRunningSummary:
 
         assert result.kind == SummaryKind.RUNNING
         assert "1 messages" in result.summary_text  # Fallback format
+
+    async def test_generate_running_passes_config(self):
+        """Config dict is forwarded to llm_provider.generate()."""
+        mock_llm = AsyncMock()
+        mock_llm.generate = AsyncMock(return_value="Summary")
+
+        summarizer = Summarizer(llm_provider=mock_llm)
+        messages = [{"role": "user", "content": "Hello"}]
+        test_config = {"callbacks": ["test"]}
+
+        await summarizer.generate_running_summary(messages=messages, config=test_config)
+
+        call_kwargs = mock_llm.generate.call_args
+        assert call_kwargs.kwargs.get("config") == test_config
 
 
 @pytest.mark.asyncio

@@ -137,13 +137,22 @@ def mock_context_builder():
 
 
 @pytest.fixture
+def mock_langfuse_service():
+    svc = MagicMock()
+    svc.create_config = MagicMock(return_value={})
+    return svc
+
+
+@pytest.fixture
 def patched_handlers(
     mock_episode_manager,
     mock_memory_service,
     mock_llm_service,
     mock_context_builder,
+    mock_langfuse_service,
 ):
     """Patch all service accessors used in handlers."""
+    mock_episode_manager.get_current_episode = AsyncMock(return_value=None)
     with (
         patch(
             "bot.handlers.get_episode_manager_service",
@@ -165,6 +174,10 @@ def patched_handlers(
             "bot.handlers.get_system_prompt",
             return_value="You are a helpful assistant.",
         ),
+        patch(
+            "bot.handlers.get_langfuse_service",
+            return_value=mock_langfuse_service,
+        ),
         patch("bot.handlers.DB_CLIENT_AVAILABLE", False),
     ):
         yield {
@@ -172,6 +185,7 @@ def patched_handlers(
             "memory_service": mock_memory_service,
             "llm_service": mock_llm_service,
             "context_builder": mock_context_builder,
+            "langfuse_service": mock_langfuse_service,
         }
 
 

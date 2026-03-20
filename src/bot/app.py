@@ -1,6 +1,7 @@
 import asyncio
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from bot.config import settings
@@ -12,8 +13,11 @@ def run() -> None:
 
 
 async def _amain() -> None:
-    assert settings.telegram_bot_token is not None, "TELEGRAM_BOT_TOKEN not set"
-    bot = Bot(token=settings.telegram_bot_token, parse_mode=ParseMode.HTML)
+    if settings.telegram_bot_token is None:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN not set")
+    bot = Bot(
+        token=settings.telegram_bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    )
     dp = Dispatcher()
     dp.include_router(router)
 
@@ -35,3 +39,10 @@ async def _amain() -> None:
     finally:
         if scheduler is not None:
             scheduler.stop()
+        await bot.session.close()
+        try:
+            from bot.services.langfuse_service import get_langfuse_service
+
+            get_langfuse_service().flush()
+        except Exception:
+            pass

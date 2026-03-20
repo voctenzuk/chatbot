@@ -22,6 +22,7 @@ from bot.services.episode_manager import (
     get_episode_manager,
     set_episode_manager,
 )
+from bot.services.langfuse_service import get_langfuse_service
 from bot.services.llm_service import LLMResponse, ToolCall, get_llm_service
 from bot.services.system_prompt import get_system_prompt
 
@@ -152,6 +153,14 @@ async def _generate_llm_response(
     episode_manager: EpisodeManager,
 ) -> LLMResponse:
     """Build context and call LLM to produce a reply."""
+    # 0. Build Langfuse tracing config (no-op dict when Langfuse is unconfigured)
+    episode = await episode_manager.get_current_episode(user_id)
+    lf_config = get_langfuse_service().create_config(
+        user_id=user_id,
+        session_id=episode.id if episode is not None else None,
+        trace_name="chat",
+    )
+
     # 1. Fetch semantic memories (best-effort)
     memories = []
     if MEMORY_SERVICE_AVAILABLE and get_memory_service is not None:
@@ -180,7 +189,7 @@ async def _generate_llm_response(
     # 4. First LLM call (with image tool if available)
     tools = [SEND_PHOTO_TOOL] if IMAGE_SERVICE_AVAILABLE and SEND_PHOTO_TOOL else None
     llm_svc = get_llm_service()
-    llm_response = await llm_svc.generate(llm_messages, tools=tools)
+    llm_response = await llm_svc.generate(llm_messages, tools=tools, config=lf_config)
 
     # 5. Tool execution loop: if LLM requested tools, run them and call LLM again
     if llm_response.tool_calls and tools:
@@ -209,7 +218,7 @@ async def _generate_llm_response(
         ]
 
         # Second LLM call without tools to prevent an infinite loop
-        final_response = await llm_svc.generate(follow_up)
+        final_response = await llm_svc.generate(follow_up, config=lf_config)
 
         # Merge: carry tool_calls from first response so chat() can deliver the photo
         return LLMResponse(

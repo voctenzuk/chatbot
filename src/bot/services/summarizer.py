@@ -22,7 +22,12 @@ from loguru import logger
 class LLMProvider(Protocol):
     """Protocol for LLM providers."""
 
-    async def generate(self, prompt: str, temperature: float = 0.7) -> str:
+    async def generate(
+        self,
+        prompt: str,
+        temperature: float = 0.7,
+        config: dict[str, Any] | None = None,
+    ) -> str:
         """Generate text from prompt."""
         ...
 
@@ -46,12 +51,14 @@ class SimpleLLMProvider:
             base_url=base_url or settings.llm_base_url,
         )
 
-    async def generate(self, prompt: str, temperature: float = 0.7) -> str:
+    async def generate(
+        self, prompt: str, temperature: float = 0.7, config: dict[str, Any] | None = None
+    ) -> str:
         """Generate text using LangChain ChatOpenAI."""
         from langchain_core.messages import HumanMessage
 
         model = self._model.bind(temperature=temperature)
-        result = await model.ainvoke([HumanMessage(content=prompt)])
+        result = await model.ainvoke([HumanMessage(content=prompt)], config=config or {})
         return str(result.content)
 
 
@@ -320,6 +327,7 @@ class Summarizer:
         messages: list[dict[str, Any]],
         previous_summary: str | None = None,
         episode_id: str | None = None,
+        config: dict[str, Any] | None = None,
     ) -> SummaryResult:
         """Generate a running summary.
 
@@ -330,6 +338,7 @@ class Summarizer:
             messages: Recent messages to summarize
             previous_summary: Optional previous running summary to build upon
             episode_id: Optional episode identifier
+            config: Optional LangChain config dict (e.g. Langfuse callbacks)
 
         Returns:
             SummaryResult with kind=RUNNING
@@ -347,6 +356,7 @@ class Summarizer:
             summary_text = await self.llm_provider.generate(
                 prompt,
                 temperature=0.5,  # Moderate temp for coherent summaries
+                config=config,
             )
             summary_text = self._truncate_text(
                 summary_text.strip(), self.config.running_summary_max_tokens
@@ -368,6 +378,7 @@ class Summarizer:
         messages: list[dict[str, Any]],
         episode_id: str | None = None,
         previous_summaries: list[str] | None = None,
+        config: dict[str, Any] | None = None,
     ) -> SummaryResult:
         """Generate a final episode summary with structured JSON.
 
@@ -377,6 +388,7 @@ class Summarizer:
             messages: All messages from the episode
             episode_id: Optional episode identifier
             previous_summaries: Optional list of previous running summaries
+            config: Optional LangChain config dict (e.g. Langfuse callbacks)
 
         Returns:
             SummaryResult with kind=FINAL and structured summary_json
@@ -401,7 +413,7 @@ class Summarizer:
 
         try:
             response = await self.llm_provider.generate(
-                prompt, temperature=self.config.final_summary_temperature
+                prompt, temperature=self.config.final_summary_temperature, config=config
             )
             response = response.strip()
 
@@ -430,6 +442,7 @@ class Summarizer:
         self,
         messages: list[dict[str, Any]],
         episode_id: str | None = None,
+        config: dict[str, Any] | None = None,
     ) -> SummaryResult:
         """Generate a chunk summary for long episodes.
 
@@ -438,6 +451,7 @@ class Summarizer:
         Args:
             messages: Messages in this chunk
             episode_id: Optional episode identifier
+            config: Optional LangChain config dict (e.g. Langfuse callbacks)
 
         Returns:
             SummaryResult with kind=CHUNK
@@ -456,7 +470,7 @@ class Summarizer:
         prompt = self._truncate_text(prompt, self.config.chunk_summary_max_tokens * 2)
 
         try:
-            summary_text = await self.llm_provider.generate(prompt, temperature=0.5)
+            summary_text = await self.llm_provider.generate(prompt, temperature=0.5, config=config)
             summary_text = self._truncate_text(
                 summary_text.strip(), self.config.chunk_summary_max_tokens
             )

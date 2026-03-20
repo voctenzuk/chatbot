@@ -38,6 +38,9 @@ except ImportError:
 
 _MAX_IMAGES_PER_DAY = 5
 
+# Note: Image generation is tracked via rate limiting (_send_counts),
+# not via Langfuse (no LangChain call to instrument).
+
 # Tool schema for LangChain bind_tools() — bare dict format (no "type"/"function" wrapper)
 SEND_PHOTO_TOOL = {
     "name": "send_photo",
@@ -69,6 +72,7 @@ class ImageService:
 
     def __init__(self) -> None:
         self._send_counts: dict[int, dict[str, int]] = {}
+        self._model = settings.image_model
 
         if not OPENAI_AVAILABLE:
             self._client = None
@@ -84,8 +88,7 @@ class ImageService:
         if settings.image_base_url:
             kwargs["base_url"] = settings.image_base_url
 
-        self._client = AsyncOpenAI(**kwargs)
-        self._model = settings.image_model
+        self._client = AsyncOpenAI(**kwargs)  # type: ignore[misc]
         logger.info("ImageService initialized with model={}", self._model)
 
     @property
@@ -140,8 +143,8 @@ class ImageService:
             )
 
             if result.data and result.data[0].b64_json:
-                self._record_send(user_id)
                 image_bytes = base64.b64decode(result.data[0].b64_json)
+                self._record_send(user_id)
                 logger.info(
                     "Generated image for user {} ({} bytes, prompt: {})",
                     user_id,

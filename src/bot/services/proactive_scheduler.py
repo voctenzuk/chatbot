@@ -32,12 +32,9 @@ from bot.config import settings
 from bot.services.llm_service import get_llm_service
 from bot.services.system_prompt import get_system_prompt
 
-try:
-    from apscheduler.jobstores.redis import RedisJobStore
+import importlib.util
 
-    REDIS_JOBSTORE_AVAILABLE = True
-except ImportError:
-    REDIS_JOBSTORE_AVAILABLE = False
+REDIS_JOBSTORE_AVAILABLE = importlib.util.find_spec("apscheduler.jobstores.redis") is not None
 
 _QUIET_HOUR_START = 23
 _QUIET_HOUR_END = 8
@@ -56,10 +53,12 @@ class ProactiveScheduler:
         self._bot = bot
         self._send_counts: dict[int, dict[str, int]] = {}
 
-        jobstores: dict[str, MemoryJobStore | RedisJobStore] = {}
+        jobstores: dict[str, MemoryJobStore] = {}
         if REDIS_JOBSTORE_AVAILABLE and settings.redis_url:
             try:
-                jobstores["default"] = RedisJobStore(url=settings.redis_url)
+                from apscheduler.jobstores.redis import RedisJobStore as _RedisJobStore
+
+                jobstores["default"] = _RedisJobStore(url=settings.redis_url)  # type: ignore[assignment]
                 logger.info("ProactiveScheduler using Redis job store")
             except Exception as e:
                 logger.warning("Redis job store failed, using memory: {}", e)
@@ -169,6 +168,8 @@ class ProactiveScheduler:
             return False
 
         try:
+            from bot.services.langfuse_service import get_langfuse_service
+
             system_prompt = get_system_prompt()
             messages = [
                 {"role": "system", "content": system_prompt},
@@ -183,7 +184,12 @@ class ProactiveScheduler:
                 {"role": "user", "content": "(ожидает твоё сообщение)"},
             ]
 
-            llm_response = await get_llm_service().generate(messages)
+            lf_config = get_langfuse_service().create_config(
+                user_id=user_id,
+                trace_name="proactive",
+                tags=["proactive"],
+            )
+            llm_response = await get_llm_service().generate(messages, config=lf_config)
             await self._bot.send_message(chat_id=user_id, text=llm_response.content)
             self._record_send(user_id)
 
