@@ -8,14 +8,14 @@ from aiogram.types import BufferedInputFile, LabeledPrice, Message, PreCheckoutQ
 from loguru import logger
 
 from bot.chat_pipeline import ChatPipeline
-from bot.services.episode_manager import (
+from bot.conversation.episode_manager import (
     EpisodeManager,
     get_episode_manager,
     set_episode_manager,
 )
 
 try:
-    from bot.services.db_client import get_db_client
+    from bot.infra.db_client import get_db_client
 
     DB_CLIENT_AVAILABLE = True
 except ImportError:

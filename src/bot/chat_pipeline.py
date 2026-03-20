@@ -13,18 +13,18 @@ from typing import Any
 
 from loguru import logger
 
-from bot.services.context_builder import (
+from bot.conversation.context_builder import (
     ConversationMessage,
     MessageRole,
     get_context_builder,
 )
-from bot.services.episode_manager import EpisodeManager, EpisodeMessage
-from bot.services.langfuse_service import get_langfuse_service
-from bot.services.llm_service import LLMResponse, ToolCall, get_llm_service
-from bot.services.system_prompt import get_system_prompt
+from bot.conversation.episode_manager import EpisodeManager, EpisodeMessage
+from bot.conversation.system_prompt import get_system_prompt
+from bot.infra.langfuse_service import get_langfuse_service
+from bot.llm.service import LLMResponse, ToolCall, get_llm_service
 
 try:
-    from bot.services.cognee_memory_service import get_memory_service
+    from bot.memory.cognee_service import get_memory_service
 
     MEMORY_SERVICE_AVAILABLE = True
 except ImportError:
@@ -32,7 +32,7 @@ except ImportError:
     MEMORY_SERVICE_AVAILABLE = False
 
 try:
-    from bot.services.db_client import get_db_client
+    from bot.infra.db_client import get_db_client
 
     DB_CLIENT_AVAILABLE = True
 except ImportError:
@@ -40,7 +40,7 @@ except ImportError:
     DB_CLIENT_AVAILABLE = False
 
 try:
-    from bot.services.image_service import SEND_PHOTO_TOOL, get_image_service
+    from bot.media.image_service import SEND_PHOTO_TOOL, get_image_service
 
     IMAGE_SERVICE_AVAILABLE = True
 except ImportError:

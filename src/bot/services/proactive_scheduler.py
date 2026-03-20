@@ -29,8 +29,8 @@ from loguru import logger
 
 from bot.config import settings
 from bot.ports import MessageDeliveryPort
-from bot.services.llm_service import get_llm_service
-from bot.services.system_prompt import get_system_prompt
+from bot.llm.service import get_llm_service
+from bot.conversation.system_prompt import get_system_prompt
 
 import importlib.util
 

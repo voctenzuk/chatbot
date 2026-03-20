@@ -44,7 +44,7 @@ async def _amain() -> None:
             scheduler.stop()
         await bot.session.close()
         try:
-            from bot.services.langfuse_service import get_langfuse_service
+            from bot.infra.langfuse_service import get_langfuse_service
 
             get_langfuse_service().flush()
         except Exception:

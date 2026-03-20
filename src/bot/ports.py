@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
-from bot.services.llm_service import LLMResponse
-from bot.services.memory_models import MemoryFact, MemoryType
+from bot.llm.service import LLMResponse
+from bot.memory.models import MemoryFact, MemoryType
 
 
 @runtime_checkable
