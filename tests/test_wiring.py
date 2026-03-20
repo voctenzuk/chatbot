@@ -5,9 +5,7 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import MagicMock, patch
 
-
 from bot.wiring import AppContext, build_app_context
-
 
 # Patch paths — imports happen inside build_app_context, so we patch at source
 _P_LLM = "bot.llm.service.LLMService"

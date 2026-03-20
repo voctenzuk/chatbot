@@ -11,7 +11,7 @@ Tests cover:
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -62,7 +62,7 @@ def mock_db_client():
             threads[user_id] = Thread(
                 id=thread_id,
                 telegram_user_id=user_id,
-                created_at=datetime.now(tz=timezone.utc),
+                created_at=datetime.now(tz=UTC),
             )
         return threads[user_id]
 
@@ -82,7 +82,7 @@ def mock_db_client():
             id=episode_id,
             thread_id=thread_id,
             status="active",
-            started_at=datetime.now(tz=timezone.utc),
+            started_at=datetime.now(tz=UTC),
             topic_label=topic_label,
         )
         episodes[episode_id] = episode
@@ -97,7 +97,7 @@ def mock_db_client():
     async def close_episode(episode_id: str) -> Episode:
         episode = episodes[episode_id]
         episode.status = "closed"
-        episode.ended_at = datetime.now(tz=timezone.utc)
+        episode.ended_at = datetime.now(tz=UTC)
         # Clear the thread's active episode
         for t in threads.values():
             if t.active_episode_id == episode_id:
@@ -127,13 +127,13 @@ def mock_db_client():
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             model=model,
-            created_at=datetime.now(tz=timezone.utc),
+            created_at=datetime.now(tz=UTC),
         )
         messages[message_id] = message
 
         # Update episode's last_user_message_at if user message
         if role == "user" and episode_id in episodes:
-            episodes[episode_id].last_user_message_at = datetime.now(tz=timezone.utc)
+            episodes[episode_id].last_user_message_at = datetime.now(tz=UTC)
 
         return message
 
@@ -274,7 +274,7 @@ class TestEpisodeSwitching:
 
         # Simulate time passing by modifying the episode's last_user_message_at
         episode = await mock_db_client.get_active_episode_for_user(12345)
-        episode.last_user_message_at = datetime.now(tz=timezone.utc) - timedelta(hours=2)
+        episode.last_user_message_at = datetime.now(tz=UTC) - timedelta(hours=2)
 
         # Second message after time gap
         result2 = await episode_manager.process_user_message(
@@ -358,7 +358,7 @@ class TestAntiFlap:
 
         # Try to trigger new episode after 2 minutes
         episode = await mock_db_client.get_active_episode_for_user(12345)
-        episode.started_at = datetime.now(tz=timezone.utc) - timedelta(minutes=2)
+        episode.started_at = datetime.now(tz=UTC) - timedelta(minutes=2)
 
         result = await manager.process_user_message(
             user_id=12345,
@@ -382,7 +382,7 @@ class TestAntiFlap:
         for i in range(5):
             episode = await mock_db_client.get_active_episode_for_user(12345)
             if episode:
-                episode.last_user_message_at = datetime.now(tz=timezone.utc) - timedelta(seconds=2)
+                episode.last_user_message_at = datetime.now(tz=UTC) - timedelta(seconds=2)
 
             _ = await manager.process_user_message(
                 user_id=12345,

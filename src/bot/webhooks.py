@@ -9,9 +9,9 @@ and audit logging.
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any
 
-from fastapi import APIRouter, Request, HTTPException, Header, Depends
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 # Stripe imports
@@ -63,7 +63,7 @@ async def get_supabase_manager() -> SupabaseManager:
         await manager.close()
 
 
-def get_stripe_client() -> Optional[Any]:
+def get_stripe_client() -> Any | None:
     """Get configured Stripe client."""
     if not STRIPE_AVAILABLE or not settings.stripe_secret_key:
         return None
@@ -80,10 +80,10 @@ async def store_webhook_event(
     supabase: SupabaseManager,
     provider: str,
     event_type: str,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     status: str = "pending",
-    error_message: Optional[str] = None,
-) -> Optional[str]:
+    error_message: str | None = None,
+) -> str | None:
     """
     Store webhook event in database for audit and idempotency.
 
@@ -156,7 +156,7 @@ async def is_event_processed(supabase: SupabaseManager, provider: str, event_id:
 
 
 async def update_event_status(
-    supabase: SupabaseManager, event_id: str, status: str, error_message: Optional[str] = None
+    supabase: SupabaseManager, event_id: str, status: str, error_message: str | None = None
 ) -> None:
     """Update webhook event processing status."""
     try:
@@ -184,7 +184,7 @@ async def update_event_status(
 @router.post("/stripe")
 async def stripe_webhook(
     request: Request,
-    stripe_signature: Optional[str] = Header(None, alias="stripe-signature"),
+    stripe_signature: str | None = Header(None, alias="stripe-signature"),
     supabase: SupabaseManager = Depends(get_supabase_manager),
 ) -> JSONResponse:
     """
@@ -263,7 +263,7 @@ async def stripe_webhook(
 
 
 async def handle_checkout_session_completed(
-    supabase: SupabaseManager, data: Dict[str, Any]
+    supabase: SupabaseManager, data: dict[str, Any]
 ) -> None:
     """
     Handle checkout.session.completed event.
@@ -367,14 +367,14 @@ async def handle_checkout_session_completed(
         raise
 
 
-async def handle_invoice_payment_succeeded(supabase: SupabaseManager, data: Dict[str, Any]) -> None:
+async def handle_invoice_payment_succeeded(supabase: SupabaseManager, data: dict[str, Any]) -> None:
     """
     Handle invoice.payment_succeeded event.
 
     Records the payment and extends the subscription period.
     """
     subscription_id = data.get("subscription")
-    _customer_id = data.get("customer")  # noqa: F841 - for logging/context
+    _customer_id = data.get("customer")
 
     if not subscription_id:
         logger.info("Invoice not associated with subscription, skipping")
@@ -440,7 +440,7 @@ async def handle_invoice_payment_succeeded(supabase: SupabaseManager, data: Dict
 
 
 async def handle_customer_subscription_updated(
-    supabase: SupabaseManager, data: Dict[str, Any]
+    supabase: SupabaseManager, data: dict[str, Any]
 ) -> None:
     """
     Handle customer.subscription.updated event.
@@ -501,7 +501,7 @@ async def handle_customer_subscription_updated(
 
 
 async def handle_customer_subscription_deleted(
-    supabase: SupabaseManager, data: Dict[str, Any]
+    supabase: SupabaseManager, data: dict[str, Any]
 ) -> None:
     """
     Handle customer.subscription.deleted event.
@@ -544,7 +544,7 @@ async def handle_customer_subscription_deleted(
     logger.info(f"Marked subscription {subscription_id} as canceled")
 
 
-async def handle_invoice_payment_failed(supabase: SupabaseManager, data: Dict[str, Any]) -> None:
+async def handle_invoice_payment_failed(supabase: SupabaseManager, data: dict[str, Any]) -> None:
     """
     Handle invoice.payment_failed event.
 
@@ -627,7 +627,7 @@ STRIPE_EVENT_HANDLERS = {
 @router.post("/paddle")
 async def paddle_webhook(
     request: Request,
-    paddle_signature: Optional[str] = Header(None, alias="paddle-signature"),
+    paddle_signature: str | None = Header(None, alias="paddle-signature"),
     supabase: SupabaseManager = Depends(get_supabase_manager),
 ) -> JSONResponse:
     """
@@ -719,7 +719,7 @@ async def paddle_webhook(
 
 
 async def handle_paddle_subscription_created(
-    supabase: SupabaseManager, data: Dict[str, Any]
+    supabase: SupabaseManager, data: dict[str, Any]
 ) -> None:
     """Handle subscription.created event from Paddle."""
     subscription_id = data.get("id")
@@ -788,7 +788,7 @@ async def handle_paddle_subscription_created(
 
 
 async def handle_paddle_subscription_updated(
-    supabase: SupabaseManager, data: Dict[str, Any]
+    supabase: SupabaseManager, data: dict[str, Any]
 ) -> None:
     """Handle subscription.updated event from Paddle."""
     subscription_id = data.get("id")
@@ -830,7 +830,7 @@ async def handle_paddle_subscription_updated(
 
 
 async def handle_paddle_transaction_completed(
-    supabase: SupabaseManager, data: Dict[str, Any]
+    supabase: SupabaseManager, data: dict[str, Any]
 ) -> None:
     """Handle transaction.completed event from Paddle (payment succeeded)."""
     subscription_id = data.get("subscription_id")
@@ -875,7 +875,7 @@ async def handle_paddle_transaction_completed(
 
 
 async def handle_paddle_subscription_canceled(
-    supabase: SupabaseManager, data: Dict[str, Any]
+    supabase: SupabaseManager, data: dict[str, Any]
 ) -> None:
     """Handle subscription.canceled event from Paddle."""
     subscription_id = data.get("id")

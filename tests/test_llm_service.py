@@ -35,7 +35,7 @@ class TestLLMServiceInit:
             mock_settings.llm_max_tokens = 512
 
             with patch("bot.services.llm_service.ChatOpenAI") as mock_chat:
-                _svc = LLMService()  # noqa: F841
+                _svc = LLMService()
 
             mock_chat.assert_called_once_with(
                 model="test-model",

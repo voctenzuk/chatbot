@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from loguru import logger
@@ -101,7 +101,7 @@ class Episode:
             status=row["status"],
             started_at=datetime.fromisoformat(row["started_at"].replace("Z", "+00:00"))
             if row.get("started_at")
-            else datetime.now(timezone.utc),
+            else datetime.now(UTC),
             ended_at=datetime.fromisoformat(row["ended_at"].replace("Z", "+00:00"))
             if row.get("ended_at")
             else None,
@@ -388,8 +388,8 @@ class DatabaseClient:
                 .update(
                     {
                         "status": "closed",
-                        "ended_at": datetime.now(timezone.utc).isoformat(),
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "ended_at": datetime.now(UTC).isoformat(),
+                        "updated_at": datetime.now(UTC).isoformat(),
                     }
                 )
                 .eq("id", episode_id)
@@ -991,7 +991,7 @@ class DatabaseClient:
             )
 
             # Insert new subscription with 30-day period
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             period_end = now + timedelta(days=30)
             provider_sub_id = f"tg_stars_{telegram_user_id}_{now.timestamp():.0f}"
 

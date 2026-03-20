@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from bot.chat_pipeline import ChatPipeline, ChatResult, _LLM_FALLBACK
+from bot.chat_pipeline import _LLM_FALLBACK, ChatPipeline, ChatResult
 from bot.services.llm_service import LLMResponse, ToolCall
 
 

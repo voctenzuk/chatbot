@@ -693,11 +693,11 @@ def get_summarizer(
     global _summarizer
 
     # Determine if we need to create a new instance
-    if _summarizer is None:
-        _summarizer = Summarizer(config, llm_provider)
-    elif config is not None:
-        _summarizer = Summarizer(config, llm_provider)
-    elif llm_provider is not None and llm_provider is not _summarizer.llm_provider:
+    if (
+        _summarizer is None
+        or config is not None
+        or (llm_provider is not None and llm_provider is not _summarizer.llm_provider)
+    ):
         _summarizer = Summarizer(config, llm_provider)
 
     # After the above blocks, _summarizer is guaranteed to be set

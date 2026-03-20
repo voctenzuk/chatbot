@@ -1,6 +1,10 @@
 ---
 name: add-service
-description: When adding a new business logic module that needs singleton wiring and tests
+description: >
+  Scaffold a new async service module with singleton wiring and test stubs.
+  Use when asked to "add service", "new service", or "create module for X".
+  Proactively use when a feature requires new business logic that doesn't fit into
+  an existing service — scaffold the service before implementing the logic.
 disable-model-invocation: true
 ---
 

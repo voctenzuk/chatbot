@@ -9,21 +9,21 @@ Tests cover:
 
 from __future__ import annotations
 
-import pytest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
 import numpy as np
+import pytest
 
 from bot.services.episode_switcher import (
+    _MAX_ARCHIVED_EPISODES_PER_USER,
+    Episode,
     EpisodeConfig,
     EpisodeManager,
-    SimpleEmbeddingProvider,
     Message,
-    Episode,
+    SimpleEmbeddingProvider,
     get_episode_manager,
     set_episode_manager,
-    _MAX_ARCHIVED_EPISODES_PER_USER,
 )
 
 

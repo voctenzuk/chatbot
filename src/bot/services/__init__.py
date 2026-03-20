@@ -44,11 +44,19 @@ except ImportError as _e:
 try:
     from bot.services.episode_switcher import (
         Episode as EpisodeSwitcherEpisode,
+    )
+    from bot.services.episode_switcher import (
         EpisodeConfig,
-        Message as EpisodeSwitcherMessage,
         SimpleEmbeddingProvider,
         SwitchDecision,
+    )
+    from bot.services.episode_switcher import (
+        Message as EpisodeSwitcherMessage,
+    )
+    from bot.services.episode_switcher import (
         get_episode_manager as get_episode_switcher_manager,
+    )
+    from bot.services.episode_switcher import (
         set_episode_manager as set_episode_switcher_manager,
     )
 except ImportError as _e:
@@ -65,7 +73,11 @@ except ImportError as _e:
 try:
     from bot.services.cognee_memory_service import (
         CogneeMemoryService,
+    )
+    from bot.services.cognee_memory_service import (
         get_memory_service as get_cognee_memory_service,
+    )
+    from bot.services.cognee_memory_service import (
         set_memory_service as set_cognee_memory_service,
     )
 except ImportError as _e:
@@ -90,8 +102,8 @@ except ImportError as _e:
 # Context Builder
 try:
     from bot.services.context_builder import (
-        ContextBuilder,
         ContextAssemblyConfig,
+        ContextBuilder,
         ContextPart,
         ConversationMessage,
         MessageRole,
@@ -112,13 +124,13 @@ except ImportError as _e:
 
 try:
     from bot.services.summarizer import (
+        ArtifactReference,
+        FactCandidate,
         Summarizer,
         SummarizerConfig,
+        SummaryJSON,
         SummaryKind,
         SummaryResult,
-        SummaryJSON,
-        FactCandidate,
-        ArtifactReference,
         get_summarizer,
         set_summarizer,
     )

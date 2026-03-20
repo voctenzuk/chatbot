@@ -1,6 +1,11 @@
 ---
 name: verify-imports
-description: Verify all Python imports resolve correctly after file moves or refactoring
+description: >
+  Verify all Python imports resolve after file moves or refactoring.
+  Use when asked to "check imports", "verify imports", or "are imports broken".
+  Proactively use after /refactor-phase, after moving/renaming modules, or after
+  removing backward-compatible shims. If a refactor just completed — run this
+  skill automatically before marking the task done.
 disable-model-invocation: true
 ---
 

@@ -13,7 +13,6 @@ from bot.chat_pipeline import ChatPipeline
 from bot.services.db_client import DatabaseClient
 from bot.services.llm_service import LLMResponse
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

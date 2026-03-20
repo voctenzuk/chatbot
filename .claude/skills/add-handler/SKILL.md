@@ -1,6 +1,11 @@
 ---
 name: add-handler
-description: When adding a new Telegram command, message handler, or callback query handler
+description: >
+  Scaffold a new Telegram command, message handler, or callback query handler.
+  Use when asked to "add command", "new handler", "bot command", or "callback handler".
+  Proactively use when the user describes a new bot interaction (e.g. "users should be
+  able to /settings" or "add inline keyboard for X") — scaffold the handler before
+  implementing business logic.
 disable-model-invocation: true
 ---
 

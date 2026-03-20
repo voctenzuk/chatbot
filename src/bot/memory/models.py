@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 
 class MemoryCategory(Enum):
@@ -88,24 +88,24 @@ class MemoryFact:
     # Importance & Decay
     importance_score: float = 1.0  # 0.0 to 2.0
     decay_rate: float = 0.01  # Daily decay rate
-    expiration_date: Optional[datetime] = None
+    expiration_date: datetime | None = None
 
     # Emotional context
     emotional_valence: float = 0.0  # -1.0 (negative) to +1.0 (positive)
     emotional_arousal: float = 0.0  # 0.0 (calm) to 1.0 (excited)
-    user_mood: Optional[str] = None  # e.g., "happy", "stressed", "tired"
+    user_mood: str | None = None  # e.g., "happy", "stressed", "tired"
 
     # Relationship context
     relationship_depth: int = 0  # 0 (stranger) to 10 (intimate friend)
 
     # Content specifics
-    image_description: Optional[str] = None
-    image_url: Optional[str] = None
+    image_description: str | None = None
+    image_url: str | None = None
     tags: list[str] = field(default_factory=list)
 
     # Context links
     related_memories: list[str] = field(default_factory=list)  # fact_ids
-    conversation_id: Optional[str] = None
+    conversation_id: str | None = None
 
     def is_expired(self) -> bool:
         """Check if memory has expired."""
@@ -150,17 +150,17 @@ class UserProfile:
     user_id: int
 
     # Identity
-    name: Optional[str] = None
-    preferred_name: Optional[str] = None
-    age: Optional[int] = None
-    occupation: Optional[str] = None
-    location: Optional[str] = None
+    name: str | None = None
+    preferred_name: str | None = None
+    age: int | None = None
+    occupation: str | None = None
+    location: str | None = None
 
     # Preferences
     likes: list[str] = field(default_factory=list)
     dislikes: list[str] = field(default_factory=list)
     interests: list[str] = field(default_factory=list)
-    communication_style: Optional[str] = None
+    communication_style: str | None = None
 
     # Patterns
     common_topics: list[str] = field(default_factory=list)

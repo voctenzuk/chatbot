@@ -21,6 +21,7 @@ Architecture:
 
 from __future__ import annotations
 
+import importlib.util
 from datetime import datetime, timedelta
 
 from apscheduler.jobstores.memory import MemoryJobStore
@@ -28,11 +29,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
 
 from bot.config import settings
-from bot.ports import MessageDeliveryPort
-from bot.llm.service import get_llm_service
 from bot.conversation.system_prompt import get_system_prompt
-
-import importlib.util
+from bot.llm.service import get_llm_service
+from bot.ports import MessageDeliveryPort
 
 REDIS_JOBSTORE_AVAILABLE = importlib.util.find_spec("apscheduler.jobstores.redis") is not None
 

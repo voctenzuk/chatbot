@@ -30,7 +30,7 @@ from __future__ import annotations
 import asyncio
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any, Protocol
 
@@ -306,7 +306,7 @@ class MemoryCleanupService:
         """
         # Check explicit expiration date
         if memory.expiration_date:
-            if datetime.now(timezone.utc) > memory.expiration_date:
+            if datetime.now(UTC) > memory.expiration_date:
                 return True, "Explicit expiration date reached"
 
         # Check category-based TTL
@@ -397,13 +397,13 @@ class MemoryCleanupService:
 
         report = CleanupReport(
             dry_run=dry_run,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
         )
         report.users_processed.add(user_id)
 
         if not self.memory_service:
             report.errors.append("No memory service configured")
-            report.completed_at = datetime.now(timezone.utc)
+            report.completed_at = datetime.now(UTC)
             return report
 
         try:
@@ -418,7 +418,7 @@ class MemoryCleanupService:
             report.total_memories_scanned = len(memories)
             logger.info("Found {} memories for user {}", len(memories), user_id)
 
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             to_delete: list[str] = []
 
             # Evaluate each memory
@@ -458,7 +458,7 @@ class MemoryCleanupService:
             logger.error("Error during cleanup for user {}: {}", user_id, e)
             report.errors.append(str(e))
 
-        report.completed_at = datetime.now(timezone.utc)
+        report.completed_at = datetime.now(UTC)
         return report
 
     async def cleanup_all(
@@ -485,14 +485,14 @@ class MemoryCleanupService:
             logger.warning("No user_ids provided for cleanup_all")
             return CleanupReport(
                 dry_run=dry_run,
-                started_at=datetime.now(timezone.utc),
-                completed_at=datetime.now(timezone.utc),
+                started_at=datetime.now(UTC),
+                completed_at=datetime.now(UTC),
                 errors=["No user_ids provided"],
             )
 
         combined_report = CleanupReport(
             dry_run=dry_run,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
         )
 
         tasks = [self.cleanup_user(uid, dry_run=dry_run) for uid in user_ids]
@@ -512,7 +512,7 @@ class MemoryCleanupService:
                 combined_report.decisions.extend(user_report.decisions)
                 combined_report.users_processed.update(user_report.users_processed)
 
-        combined_report.completed_at = datetime.now(timezone.utc)
+        combined_report.completed_at = datetime.now(UTC)
 
         logger.info(
             "Cleanup complete: {} users, {} scanned, {} expired, {} deleted (dry_run={})",

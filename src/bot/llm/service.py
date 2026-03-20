@@ -13,11 +13,10 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+from langchain_openai import ChatOpenAI
 from loguru import logger
 
 from bot.config import settings
-
-from langchain_openai import ChatOpenAI
 
 
 @dataclass(frozen=True)

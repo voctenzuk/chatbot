@@ -9,7 +9,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import BufferedInputFile, LabeledPrice, Message, PreCheckoutQuery
 from loguru import logger
 
-from bot.chat_pipeline import ChatPipeline, _LLM_FALLBACK
+from bot.chat_pipeline import _LLM_FALLBACK, ChatPipeline
 
 router = Router()
 

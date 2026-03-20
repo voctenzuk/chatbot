@@ -9,7 +9,7 @@ These tests cover the TTL/decay maintenance functionality including:
 """
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -100,8 +100,8 @@ class TestCleanupReport:
 
     def test_duration_calculation(self):
         """Test duration calculation."""
-        started = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
-        completed = datetime(2024, 1, 1, 12, 0, 30, tzinfo=timezone.utc)
+        started = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
+        completed = datetime(2024, 1, 1, 12, 0, 30, tzinfo=UTC)
 
         report = CleanupReport(
             dry_run=True,
@@ -115,7 +115,7 @@ class TestCleanupReport:
         """Test duration when not completed."""
         report = CleanupReport(
             dry_run=True,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             completed_at=None,
         )
 
@@ -123,8 +123,8 @@ class TestCleanupReport:
 
     def test_to_dict(self):
         """Test report serialization."""
-        started = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
-        completed = datetime(2024, 1, 1, 12, 0, 30, tzinfo=timezone.utc)
+        started = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
+        completed = datetime(2024, 1, 1, 12, 0, 30, tzinfo=UTC)
 
         report = CleanupReport(
             dry_run=True,
@@ -156,7 +156,7 @@ class TestCleanupReport:
 
         report = CleanupReport(
             dry_run=True,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             decisions=decisions,
         )
 
@@ -212,7 +212,7 @@ class TestCalculateEffectiveImportance:
             content="Test",
             user_id=123,
             importance_score=1.0,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
         importance = service._calculate_effective_importance(memory, age_days=0)
@@ -224,7 +224,7 @@ class TestCalculateEffectiveImportance:
             content="Test",
             user_id=123,
             importance_score=1.0,
-            timestamp=datetime.now(timezone.utc) - timedelta(days=30),
+            timestamp=datetime.now(UTC) - timedelta(days=30),
         )
 
         importance = service._calculate_effective_importance(memory, age_days=30)
@@ -238,7 +238,7 @@ class TestCalculateEffectiveImportance:
             user_id=123,
             importance_score=1.0,
             access_count=10,  # Above threshold of 5
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
         importance = service._calculate_effective_importance(memory, age_days=0)
@@ -252,7 +252,7 @@ class TestCalculateEffectiveImportance:
             user_id=123,
             importance_score=1.0,
             emotional_valence=0.8,  # High positive
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
         importance = service._calculate_effective_importance(memory, age_days=0)
@@ -266,7 +266,7 @@ class TestCalculateEffectiveImportance:
             user_id=123,
             importance_score=1.0,
             emotional_valence=-0.9,  # High negative
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
         importance = service._calculate_effective_importance(memory, age_days=0)
@@ -280,7 +280,7 @@ class TestCalculateEffectiveImportance:
             user_id=123,
             importance_score=0.1,  # Low importance
             memory_type=MemoryType.IDENTITY,  # But identity has 1.5 floor
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
         importance = service._calculate_effective_importance(memory, age_days=0)
@@ -295,7 +295,7 @@ class TestCalculateEffectiveImportance:
             importance_score=1.9,
             access_count=10,  # +0.3 boost
             emotional_valence=0.9,  # +0.2 boost
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
         importance = service._calculate_effective_importance(memory, age_days=0)
@@ -321,7 +321,7 @@ class TestShouldExpire:
 
     def test_explicit_expiration_date_reached(self, service):
         """Test expiration when explicit date is reached."""
-        past_date = datetime.now(timezone.utc) - timedelta(days=1)
+        past_date = datetime.now(UTC) - timedelta(days=1)
         memory = MemoryFact(
             content="Test",
             user_id=123,
@@ -336,7 +336,7 @@ class TestShouldExpire:
 
     def test_explicit_expiration_date_not_reached(self, service):
         """Test no expiration when explicit date not yet reached."""
-        future_date = datetime.now(timezone.utc) + timedelta(days=10)
+        future_date = datetime.now(UTC) + timedelta(days=10)
         memory = MemoryFact(
             content="Test",
             user_id=123,
@@ -436,10 +436,10 @@ class TestEvaluateMemory:
             user_id=123,
             importance_score=1.5,
             memory_category=MemoryCategory.SEMANTIC,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
-        decision = service._evaluate_memory(memory, datetime.now(timezone.utc))
+        decision = service._evaluate_memory(memory, datetime.now(UTC))
 
         assert decision.action == CleanupAction.KEEP
         assert decision.memory_id == memory.fact_id
@@ -452,10 +452,10 @@ class TestEvaluateMemory:
             user_id=123,
             importance_score=0.2,
             memory_category=MemoryCategory.EPISODIC,
-            timestamp=datetime.now(timezone.utc) - timedelta(days=100),
+            timestamp=datetime.now(UTC) - timedelta(days=100),
         )
 
-        decision = service._evaluate_memory(memory, datetime.now(timezone.utc))
+        decision = service._evaluate_memory(memory, datetime.now(UTC))
 
         assert decision.action == CleanupAction.EXPIRE
 
@@ -465,10 +465,10 @@ class TestEvaluateMemory:
             content="Moderately important",
             user_id=123,
             importance_score=1.0,
-            timestamp=datetime.now(timezone.utc) - timedelta(days=30),
+            timestamp=datetime.now(UTC) - timedelta(days=30),
         )
 
-        decision = service._evaluate_memory(memory, datetime.now(timezone.utc))
+        decision = service._evaluate_memory(memory, datetime.now(UTC))
 
         # After 30 days with 1% decay, importance drops to ~0.74
         # This is more than 20% decay from 1.0, so should be DECAY
@@ -480,10 +480,10 @@ class TestEvaluateMemory:
         memory = MemoryFact(
             content="x" * 200,  # Long content
             user_id=123,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
-        decision = service._evaluate_memory(memory, datetime.now(timezone.utc))
+        decision = service._evaluate_memory(memory, datetime.now(UTC))
 
         assert len(decision.content_preview) <= 104  # 100 + "..."
         assert decision.content_preview.endswith("...")
@@ -493,10 +493,10 @@ class TestEvaluateMemory:
         memory = MemoryFact(
             content="Short",
             user_id=123,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
-        decision = service._evaluate_memory(memory, datetime.now(timezone.utc))
+        decision = service._evaluate_memory(memory, datetime.now(UTC))
 
         assert decision.content_preview == "Short"
 
@@ -592,7 +592,7 @@ class TestCleanupUser:
     @pytest.mark.asyncio
     async def test_cleanup_user_counts_actions(self, service, mock_memory_service):
         """Test that different actions are counted correctly."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         memories = [
             # Will be KEPT - fresh and important
             MemoryFact(
@@ -693,7 +693,7 @@ class TestCleanupAll:
     @pytest.mark.asyncio
     async def test_cleanup_all_aggregates_counts(self, service, mock_memory_service):
         """Test that counts are aggregated across users."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         call_count = [0]
         results = [
             [

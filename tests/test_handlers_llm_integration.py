@@ -16,7 +16,6 @@ from aiogram.types import Chat, User
 from bot.chat_pipeline import ChatPipeline
 from bot.llm.service import LLMResponse, ToolCall
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

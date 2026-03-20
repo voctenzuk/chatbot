@@ -226,7 +226,7 @@ class LocalStorageBackend(StorageBackend):
             if not file_path.exists():
                 return None
             return file_path.read_bytes()
-        except (IOError, OSError) as e:
+        except OSError as e:
             logger.error("Failed to retrieve artifact {}: {}", storage_key, e)
             return None
 
@@ -252,7 +252,7 @@ class LocalStorageBackend(StorageBackend):
                 parent = parent.parent
 
             return True
-        except (IOError, OSError) as e:
+        except OSError as e:
             logger.error("Failed to delete artifact {}: {}", storage_key, e)
             return False
 
@@ -268,7 +268,7 @@ class LocalStorageBackend(StorageBackend):
         try:
             file_path = self._get_file_path(storage_key)
             return file_path.exists()
-        except (IOError, OSError, ValueError):
+        except (OSError, ValueError):
             return False
 
     def get_public_url(self, storage_key: str) -> str | None:

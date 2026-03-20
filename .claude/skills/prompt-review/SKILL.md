@@ -1,6 +1,10 @@
 ---
 name: prompt-review
-description: When system prompt, context assembly, or LLM interaction patterns have changed
+description: >
+  Review system prompt quality, context assembly efficiency, and injection defense.
+  Use when asked to "review prompt", "check persona", or "audit context assembly".
+  Proactively use after changes to system_prompt.py, context_builder.py, or
+  summarizer.py — any modification to what the LLM sees should trigger a prompt review.
 context: fork
 disable-model-invocation: true
 ---

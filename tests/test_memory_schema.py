@@ -4,8 +4,9 @@ These tests verify that the database schema for threads, episodes,
 messages, and episode_summaries tables is correctly defined.
 """
 
-import pytest
 import os
+
+import pytest
 
 # Handle optional pytest-asyncio dependency
 try:

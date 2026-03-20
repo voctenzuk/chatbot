@@ -7,9 +7,9 @@ All Cognee API interactions are mocked.
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from bot.services.cognee_memory_service import (
     CogneeMemoryService,

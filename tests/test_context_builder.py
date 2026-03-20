@@ -1,11 +1,12 @@
 """Tests for ContextBuilder service."""
 
-import pytest
 from datetime import datetime, timedelta
 
+import pytest
+
 from bot.services.context_builder import (
-    ContextBuilder,
     ContextAssemblyConfig,
+    ContextBuilder,
     ContextPart,
     ConversationMessage,
     MessageRole,
@@ -14,8 +15,8 @@ from bot.services.context_builder import (
     set_context_builder,
 )
 from bot.services.memory_models import (
-    MemoryFact,
     MemoryCategory,
+    MemoryFact,
     MemoryType,
 )
 
@@ -799,8 +800,8 @@ class TestBuildArtifactSurrogatesPart:
     def sample_surrogates(self):
         """Create sample surrogates for testing."""
         from bot.services.artifact_service import (
-            TextSurrogateForContext,
             ArtifactType,
+            TextSurrogateForContext,
             TextSurrogateKind,
         )
 
@@ -870,8 +871,8 @@ class TestBuildArtifactSurrogatesPart:
     def test_build_truncates_long_content(self):
         """Test that long surrogate content is truncated."""
         from bot.services.artifact_service import (
-            TextSurrogateForContext,
             ArtifactType,
+            TextSurrogateForContext,
             TextSurrogateKind,
         )
 
@@ -901,8 +902,8 @@ class TestBuildArtifactSurrogatesPart:
     def test_build_prioritizes_surrogates(self):
         """Test that surrogates are included in priority order."""
         from bot.services.artifact_service import (
-            TextSurrogateForContext,
             ArtifactType,
+            TextSurrogateForContext,
             TextSurrogateKind,
         )
 
@@ -938,8 +939,8 @@ class TestAssembleWithArtifactSurrogates:
     def test_assemble_includes_surrogates(self):
         """Test that assemble includes artifact surrogates."""
         from bot.services.artifact_service import (
-            TextSurrogateForContext,
             ArtifactType,
+            TextSurrogateForContext,
             TextSurrogateKind,
         )
 
@@ -968,8 +969,8 @@ class TestAssembleWithArtifactSurrogates:
     def test_assemble_order_with_surrogates(self):
         """Test that surrogates appear in correct order."""
         from bot.services.artifact_service import (
-            TextSurrogateForContext,
             ArtifactType,
+            TextSurrogateForContext,
             TextSurrogateKind,
         )
 
@@ -1008,8 +1009,8 @@ class TestAssembleForLLMWithSurrogates:
     def test_assemble_for_llm_includes_surrogates(self):
         """Test that assemble_for_llm includes artifact surrogates."""
         from bot.services.artifact_service import (
-            TextSurrogateForContext,
             ArtifactType,
+            TextSurrogateForContext,
             TextSurrogateKind,
         )
 
