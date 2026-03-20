@@ -1,5 +1,7 @@
 """Tests for ArtifactService and storage backend."""
 
+from __future__ import annotations
+
 import io
 import pytest
 from unittest.mock import MagicMock, AsyncMock
@@ -339,7 +341,16 @@ class TestArtifactServiceBasics:
     def mock_db(self):
         """Create a mock database client."""
         db = MagicMock()
-        db._client = MagicMock()
+        db.get_artifact_row_by_id = AsyncMock()
+        db.rpc_get_artifact_by_sha256 = AsyncMock()
+        db.rpc_get_artifacts_for_episode = AsyncMock()
+        db.delete_artifact_row = AsyncMock()
+        db.rpc_add_artifact = AsyncMock()
+        db.update_artifact_row = AsyncMock()
+        db.rpc_upsert_artifact_text = AsyncMock()
+        db.get_artifact_text_rows = AsyncMock()
+        db.get_artifact_text_row_by_id = AsyncMock()
+        db.rpc_get_artifact_surrogates_for_context = AsyncMock()
         return db
 
     @pytest.fixture
@@ -357,7 +368,7 @@ class TestArtifactServiceBasics:
     @pytest.mark.asyncio
     async def test_get_artifact_by_id_found(self, service, mock_db):
         """Test retrieving artifact by ID when found."""
-        mock_db._client.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value.data = {
+        mock_db.get_artifact_row_by_id.return_value = {
             "id": "test-uuid",
             "user_id": 12345,
             "type": "image",
@@ -377,7 +388,7 @@ class TestArtifactServiceBasics:
     @pytest.mark.asyncio
     async def test_get_artifact_by_id_not_found(self, service, mock_db):
         """Test retrieving artifact by ID when not found."""
-        mock_db._client.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value.data = None
+        mock_db.get_artifact_row_by_id.return_value = None
 
         artifact = await service.get_artifact_by_id("nonexistent")
 
@@ -391,7 +402,10 @@ class TestArtifactServiceDeduplication:
     def mock_db(self):
         """Create a mock database client."""
         db = MagicMock()
-        db._client = MagicMock()
+        db.get_artifact_row_by_id = AsyncMock()
+        db.rpc_get_artifact_by_sha256 = AsyncMock()
+        db.rpc_add_artifact = AsyncMock()
+        db.update_artifact_row = AsyncMock()
         return db
 
     @pytest.fixture
@@ -409,7 +423,6 @@ class TestArtifactServiceDeduplication:
     @pytest.mark.asyncio
     async def test_deduplication_reuses_existing(self, service, mock_db, mock_storage):
         """Test that duplicate sha256 returns existing artifact."""
-        # Setup existing artifact in DB
         existing_row = {
             "id": "existing-uuid",
             "user_id": 12345,
@@ -421,8 +434,8 @@ class TestArtifactServiceDeduplication:
             "storage_provider": "local",
         }
 
-        # Mock get_artifact_by_sha256 RPC
-        mock_db._client.rpc.return_value.execute.return_value.data = [
+        # Mock rpc_get_artifact_by_sha256
+        mock_db.rpc_get_artifact_by_sha256.return_value = [
             {
                 "artifact_id": "existing-uuid",
                 "storage_key": "existing-key",
@@ -430,8 +443,8 @@ class TestArtifactServiceDeduplication:
             }
         ]
 
-        # Mock get_artifact_by_id
-        mock_db._client.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value.data = existing_row
+        # Mock get_artifact_row_by_id
+        mock_db.get_artifact_row_by_id.return_value = existing_row
 
         request = CreateArtifactRequest(
             user_id=12345,
@@ -452,7 +465,7 @@ class TestArtifactServiceDeduplication:
     async def test_new_artifact_stores_file(self, service, mock_db, mock_storage):
         """Test that new artifacts store the file."""
         # No existing artifact
-        mock_db._client.rpc.return_value.execute.return_value.data = []
+        mock_db.rpc_get_artifact_by_sha256.return_value = []
 
         # Mock storage.store
         mock_storage.store.return_value = StorageReference(
@@ -462,11 +475,11 @@ class TestArtifactServiceDeduplication:
             sha256="abc123" * 8,
         )
 
-        # Mock add_artifact RPC
-        mock_db._client.rpc.return_value.execute.return_value.data = "new-artifact-uuid"
+        # Mock rpc_add_artifact
+        mock_db.rpc_add_artifact.return_value = "new-artifact-uuid"
 
-        # Mock get_artifact_by_id for the return
-        mock_db._client.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value.data = {
+        # Mock get_artifact_row_by_id for the return
+        mock_db.get_artifact_row_by_id.return_value = {
             "id": "new-artifact-uuid",
             "user_id": 12345,
             "type": "image",
@@ -498,7 +511,8 @@ class TestArtifactServiceTextSurrogates:
     def mock_db(self):
         """Create a mock database client."""
         db = MagicMock()
-        db._client = MagicMock()
+        db.rpc_upsert_artifact_text = AsyncMock(return_value="text-uuid")
+        db.update_artifact_row = AsyncMock(return_value=[])
         return db
 
     @pytest.fixture
@@ -514,8 +528,6 @@ class TestArtifactServiceTextSurrogates:
     @pytest.mark.asyncio
     async def test_add_vision_summary(self, service, mock_db):
         """Test adding vision summary."""
-        mock_db._client.rpc.return_value.execute.return_value.data = "text-uuid"
-
         # Mock _get_text_by_id
         service._get_text_by_id = AsyncMock(
             return_value=ArtifactText(
@@ -539,8 +551,6 @@ class TestArtifactServiceTextSurrogates:
     @pytest.mark.asyncio
     async def test_add_vision_detail(self, service, mock_db):
         """Test adding detailed vision description."""
-        mock_db._client.rpc.return_value.execute.return_value.data = "text-uuid"
-
         service._get_text_by_id = AsyncMock(
             return_value=ArtifactText(
                 id="text-uuid",
@@ -561,8 +571,6 @@ class TestArtifactServiceTextSurrogates:
     @pytest.mark.asyncio
     async def test_add_ocr_text(self, service, mock_db):
         """Test adding OCR text."""
-        mock_db._client.rpc.return_value.execute.return_value.data = "text-uuid"
-
         service._get_text_by_id = AsyncMock(
             return_value=ArtifactText(
                 id="text-uuid",
@@ -588,8 +596,6 @@ class TestArtifactServiceTextSurrogates:
     @pytest.mark.asyncio
     async def test_add_document_text(self, service, mock_db):
         """Test adding document text with summary."""
-        mock_db._client.rpc.return_value.execute.return_value.data = "text-uuid"
-
         service._get_text_by_id = AsyncMock(
             side_effect=[
                 ArtifactText(
@@ -620,8 +626,6 @@ class TestArtifactServiceTextSurrogates:
     @pytest.mark.asyncio
     async def test_add_document_chunk(self, service, mock_db):
         """Test adding chunked document text."""
-        mock_db._client.rpc.return_value.execute.return_value.data = "text-uuid"
-
         service._get_text_by_id = AsyncMock(
             return_value=ArtifactText(
                 id="text-uuid",
@@ -653,7 +657,7 @@ class TestArtifactServiceContextIntegration:
     def mock_db(self):
         """Create a mock database client."""
         db = MagicMock()
-        db._client = MagicMock()
+        db.rpc_get_artifact_surrogates_for_context = AsyncMock()
         return db
 
     @pytest.fixture
@@ -669,7 +673,7 @@ class TestArtifactServiceContextIntegration:
     @pytest.mark.asyncio
     async def test_get_surrogates_for_context(self, service, mock_db):
         """Test getting surrogates formatted for context."""
-        mock_db._client.rpc.return_value.execute.return_value.data = [
+        mock_db.rpc_get_artifact_surrogates_for_context.return_value = [
             {
                 "artifact_id": "artifact-1",
                 "artifact_type": "image",
@@ -701,7 +705,7 @@ class TestArtifactServiceContextIntegration:
     @pytest.mark.asyncio
     async def test_get_surrogates_empty(self, service, mock_db):
         """Test getting surrogates when none exist."""
-        mock_db._client.rpc.return_value.execute.return_value.data = []
+        mock_db.rpc_get_artifact_surrogates_for_context.return_value = []
 
         surrogates = await service.get_surrogates_for_context(
             episode_id="episode-uuid",

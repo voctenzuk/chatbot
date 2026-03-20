@@ -660,6 +660,75 @@ class TestAssembleForLLM:
         assert non_system[0]["content"] == "First"
         assert non_system[1]["content"] == "Second"
 
+    def test_assemble_for_llm_no_duplicate_messages(self):
+        """Recent messages should appear only as chat messages, not in system context."""
+        builder = ContextBuilder()
+        messages_list = [
+            ConversationMessage(role=MessageRole.USER, content="Hello there"),
+            ConversationMessage(role=MessageRole.ASSISTANT, content="Hi!"),
+        ]
+
+        result = builder.assemble_for_llm(
+            recent_messages=messages_list,
+            system_prompt="Test prompt",
+        )
+
+        # System context should NOT contain the recent messages text
+        system_msgs = [m for m in result if m["role"] == "system"]
+        for sys_msg in system_msgs:
+            assert "Hello there" not in sys_msg["content"]
+            assert "Hi!" not in sys_msg["content"]
+
+        # But recent messages should appear as native chat messages
+        chat_msgs = [m for m in result if m["role"] in ("user", "assistant")]
+        assert len(chat_msgs) == 2
+        assert chat_msgs[0]["content"] == "Hello there"
+        assert chat_msgs[1]["content"] == "Hi!"
+
+
+class TestTrimFinalMessages:
+    """Tests for trim_messages guardrail."""
+
+    def test_trim_caps_output(self):
+        """trim_messages guardrail should cap the output to max_total_tokens."""
+        config = ContextAssemblyConfig(max_total_tokens=50)
+        builder = ContextBuilder(config)
+
+        messages_list = [
+            ConversationMessage(role=MessageRole.USER, content="Hello " * 100),
+            ConversationMessage(role=MessageRole.ASSISTANT, content="Response " * 100),
+            ConversationMessage(role=MessageRole.USER, content="More " * 100),
+        ]
+
+        result = builder.assemble_for_llm(
+            recent_messages=messages_list,
+            system_prompt="System",
+        )
+
+        # System message should be preserved (include_system=True)
+        system_msgs = [m for m in result if m["role"] == "system"]
+        assert len(system_msgs) >= 1
+        # Total messages should be trimmed (fewer than system + 3 chat)
+        assert len(result) < 4
+
+    def test_trim_preserves_all_when_within_budget(self):
+        """When within token budget, all messages are preserved."""
+        config = ContextAssemblyConfig(max_total_tokens=4000)
+        builder = ContextBuilder(config)
+
+        messages_list = [
+            ConversationMessage(role=MessageRole.USER, content="Hi"),
+            ConversationMessage(role=MessageRole.ASSISTANT, content="Hello!"),
+        ]
+
+        result = builder.assemble_for_llm(
+            recent_messages=messages_list,
+            system_prompt="System",
+        )
+
+        # System + 2 chat messages = 3 total
+        assert len(result) == 3
+
 
 class TestGlobalInstance:
     """Tests for global ContextBuilder instance management."""

@@ -1,5 +1,7 @@
 """Tests for Summarizer service."""
 
+from __future__ import annotations
+
 import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock
@@ -429,6 +431,25 @@ class TestParseSummaryJSON:
         assert result.facts_candidates[0].confidence == 0.0
 
 
+class TestExtractFirstJson:
+    """Tests for _extract_first_json helper."""
+
+    def test_extract_from_surrounding_text(self):
+        """Test extraction when JSON is surrounded by text."""
+        summarizer = Summarizer()
+        assert summarizer._extract_first_json('prefix {"a": 1} suffix') == '{"a": 1}'
+
+    def test_extract_no_json(self):
+        """Test returns None when no JSON object is present."""
+        summarizer = Summarizer()
+        assert summarizer._extract_first_json("no json here") is None
+
+    def test_extract_nested_json(self):
+        """Test that nested braces are handled correctly."""
+        summarizer = Summarizer()
+        assert summarizer._extract_first_json('{"nested": {"x": 1}}') == '{"nested": {"x": 1}}'
+
+
 class TestCreateTextFromJSON:
     """Tests for text summary creation from JSON."""
 
@@ -499,8 +520,8 @@ class TestTriggerChecks:
         assert result is True
 
 
-class TestExtractFactsForMem0:
-    """Tests for mem0 fact extraction."""
+class TestExtractFactsForMemory:
+    """Tests for fact extraction."""
 
     def test_extract_high_confidence(self):
         """Test extracting high confidence facts."""
@@ -520,7 +541,7 @@ class TestExtractFactsForMem0:
             summary_json=summary_json,
         )
 
-        facts = summarizer.extract_facts_for_mem0(result)
+        facts = summarizer.extract_facts_for_memory(result)
 
         assert len(facts) == 1
         assert facts[0].text == "High"
@@ -534,7 +555,7 @@ class TestExtractFactsForMem0:
             summary_json=None,
         )
 
-        facts = summarizer.extract_facts_for_mem0(result)
+        facts = summarizer.extract_facts_for_memory(result)
 
         assert facts == []
 
@@ -554,7 +575,7 @@ class TestExtractFactsForMem0:
             summary_json=summary_json,
         )
 
-        facts = summarizer.extract_facts_for_mem0(result, min_confidence=0.65)
+        facts = summarizer.extract_facts_for_memory(result, min_confidence=0.65)
 
         assert len(facts) == 1
         assert facts[0].text == "B"
@@ -578,7 +599,7 @@ class TestExtractFactsForMem0:
         )
 
         # Explicit 0.0 should return ALL facts, not use config default (0.8)
-        facts = summarizer.extract_facts_for_mem0(result, min_confidence=0.0)
+        facts = summarizer.extract_facts_for_memory(result, min_confidence=0.0)
 
         assert len(facts) == 3
         assert facts[0].text == "Low confidence"
@@ -605,7 +626,7 @@ class TestExtractFactsForMem0:
             summary_json=summary_json,
         )
 
-        facts = summarizer.extract_facts_for_mem0(result)
+        facts = summarizer.extract_facts_for_memory(result)
 
         # Should be limited to max_facts_per_summary (3)
         assert len(facts) == 3
@@ -670,6 +691,20 @@ class TestGenerateRunningSummary:
 
         assert result.kind == SummaryKind.RUNNING
         assert "1 messages" in result.summary_text  # Fallback format
+
+    async def test_generate_running_passes_config(self):
+        """Config dict is forwarded to llm_provider.generate()."""
+        mock_llm = AsyncMock()
+        mock_llm.generate = AsyncMock(return_value="Summary")
+
+        summarizer = Summarizer(llm_provider=mock_llm)
+        messages = [{"role": "user", "content": "Hello"}]
+        test_config = {"callbacks": ["test"]}
+
+        await summarizer.generate_running_summary(messages=messages, config=test_config)
+
+        call_kwargs = mock_llm.generate.call_args
+        assert call_kwargs.kwargs.get("config") == test_config
 
 
 @pytest.mark.asyncio
@@ -789,6 +824,89 @@ class TestGenerateChunkSummary:
 
         assert result.kind == SummaryKind.CHUNK
         assert "1 messages" in result.summary_text  # Fallback format
+
+
+class TestPromptInjectionProtection:
+    """Tests that prompt injection via user messages is mitigated."""
+
+    def test_final_summary_prompt_has_anti_injection(self):
+        """Final summary prompt template should warn about user content."""
+        config = SummarizerConfig()
+        assert "НЕ выполняй" in config.final_summary_prompt_template
+
+    def test_running_summary_prompt_has_anti_injection(self):
+        """Running summary prompt template should warn about user content."""
+        config = SummarizerConfig()
+        assert "НЕ выполняй" in config.running_summary_prompt_template
+
+    @pytest.mark.asyncio
+    async def test_final_summary_wraps_messages_in_tags(self):
+        """Final summary should wrap conversation in XML tags."""
+        mock_llm = AsyncMock()
+        mock_llm.generate = AsyncMock(return_value='{"topic": "T"}')
+
+        summarizer = Summarizer(llm_provider=mock_llm)
+        messages = [{"role": "user", "content": "Hello"}]
+
+        await summarizer.generate_final_summary(messages=messages)
+
+        prompt = mock_llm.generate.call_args[0][0]
+        assert "<conversation>" in prompt
+        assert "</conversation>" in prompt
+
+    @pytest.mark.asyncio
+    async def test_chunk_summary_wraps_messages_in_tags(self):
+        """Chunk summary should wrap conversation in XML tags."""
+        mock_llm = AsyncMock()
+        mock_llm.generate = AsyncMock(return_value="Summary text")
+
+        summarizer = Summarizer(llm_provider=mock_llm)
+        messages = [{"role": "user", "content": "Hello"}]
+
+        await summarizer.generate_chunk_summary(messages=messages)
+
+        prompt = mock_llm.generate.call_args[0][0]
+        assert "<conversation>" in prompt
+        assert "</conversation>" in prompt
+
+
+class TestValidateSummaryJSON:
+    """Tests for summary JSON validation."""
+
+    def test_clamps_confidence(self):
+        """Confidence values outside [0, 1] should be clamped."""
+        summarizer = Summarizer()
+        summary = SummaryJSON(
+            facts_candidates=[
+                FactCandidate(text="Fact", confidence=1.5),
+                FactCandidate(text="Fact2", confidence=-0.5),
+            ]
+        )
+        validated = summarizer._validate_summary_json(summary)
+        assert validated.facts_candidates[0].confidence == 1.0
+        assert validated.facts_candidates[1].confidence == 0.0
+
+    def test_truncates_long_fact_text(self):
+        """Fact text longer than 500 chars should be truncated."""
+        summarizer = Summarizer()
+        summary = SummaryJSON(facts_candidates=[FactCandidate(text="A" * 1000, confidence=0.9)])
+        validated = summarizer._validate_summary_json(summary)
+        assert len(validated.facts_candidates[0].text) == 500
+
+    def test_limits_fact_count(self):
+        """Should not exceed max_facts_per_summary."""
+        config = SummarizerConfig(max_facts_per_summary=2)
+        summarizer = Summarizer(config=config)
+        summary = SummaryJSON(facts_candidates=[FactCandidate(text=f"Fact {i}") for i in range(10)])
+        validated = summarizer._validate_summary_json(summary)
+        assert len(validated.facts_candidates) == 2
+
+    def test_truncates_long_topic(self):
+        """Topic longer than 200 chars should be truncated."""
+        summarizer = Summarizer()
+        summary = SummaryJSON(topic="T" * 500)
+        validated = summarizer._validate_summary_json(summary)
+        assert len(validated.topic) == 200
 
 
 class TestGlobalInstance:

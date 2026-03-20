@@ -101,8 +101,58 @@ def mock_episode_manager():
 
 @pytest.fixture
 def mock_get_episode_manager(mock_episode_manager):
-    """Mock get_episode_manager_service function."""
-    with patch("bot.handlers.get_episode_manager_service", return_value=mock_episode_manager):
+    """Mock get_episode_manager_service function and pipeline dependencies."""
+    mock_langfuse_service = MagicMock()
+    mock_langfuse_service.create_config = MagicMock(return_value={})
+
+    mock_context_builder = MagicMock()
+    mock_context_builder.assemble_for_llm = MagicMock(
+        return_value=[
+            {"role": "system", "content": "system prompt"},
+            {"role": "user", "content": "hello"},
+        ]
+    )
+
+    mock_llm_service = AsyncMock()
+    from bot.services.llm_service import LLMResponse
+
+    mock_llm_service.generate = AsyncMock(
+        return_value=LLMResponse(
+            content="test reply",
+            model="test-model",
+            tokens_in=10,
+            tokens_out=5,
+        )
+    )
+
+    mock_episode_manager.get_current_episode = AsyncMock(return_value=None)
+    mock_episode_manager.get_recent_messages = AsyncMock(return_value=[])
+
+    with (
+        patch(
+            "bot.handlers.get_episode_manager_service",
+            new=AsyncMock(return_value=mock_episode_manager),
+        ),
+        patch("bot.handlers.DB_CLIENT_AVAILABLE", False),
+        patch("bot.chat_pipeline.DB_CLIENT_AVAILABLE", False),
+        patch("bot.chat_pipeline.MEMORY_SERVICE_AVAILABLE", False),
+        patch(
+            "bot.chat_pipeline.get_langfuse_service",
+            return_value=mock_langfuse_service,
+        ),
+        patch(
+            "bot.chat_pipeline.get_llm_service",
+            return_value=mock_llm_service,
+        ),
+        patch(
+            "bot.chat_pipeline.get_context_builder",
+            return_value=mock_context_builder,
+        ),
+        patch(
+            "bot.chat_pipeline.get_system_prompt",
+            return_value="You are a helpful assistant.",
+        ),
+    ):
         yield mock_episode_manager
 
 

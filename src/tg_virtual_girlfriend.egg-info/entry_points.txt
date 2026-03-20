@@ -1,2 +1,0 @@
-[console_scripts]
-bot = bot.__main__:main
