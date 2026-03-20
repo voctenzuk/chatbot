@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.egg-info/
 
 # Virtual environments
 .venv/
@@ -29,3 +30,23 @@ EOF
 
 # Env files
 .env
+
+# Node
+node_modules/
+
+# Databases
+*.db
+
+# Claude tooling
+.claude-flow/
+.swarm/
+
+# Architecture docs (generated)
+ARCHITECTURE/
+
+# Agents (generated, top-level only)
+/agents/
+
+# Lock files
+uv.lock
+.gstack/

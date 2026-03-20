@@ -1,5 +1,7 @@
 """Services module for bot functionality."""
 
+from loguru import logger
+
 # Episode Manager Service
 try:
     from bot.services.episode_manager import (
@@ -9,7 +11,8 @@ try:
         get_episode_manager,
         set_episode_manager,
     )
-except ImportError:
+except ImportError as _e:
+    logger.warning("Failed to import episode_manager: {}", _e)
     EpisodeManager = None  # type: ignore
     EpisodeManagerConfig = None  # type: ignore
     MessageResult = None  # type: ignore
@@ -27,7 +30,8 @@ try:
         get_db_client,
         set_db_client,
     )
-except ImportError:
+except ImportError as _e:
+    logger.warning("Failed to import db_client: {}", _e)
     DatabaseClient = None  # type: ignore
     Episode = None  # type: ignore
     EpisodeMessage = None  # type: ignore
@@ -47,7 +51,8 @@ try:
         get_episode_manager as get_episode_switcher_manager,
         set_episode_manager as set_episode_switcher_manager,
     )
-except ImportError:
+except ImportError as _e:
+    logger.warning("Failed to import episode_switcher: {}", _e)
     EpisodeSwitcherEpisode = None  # type: ignore
     EpisodeConfig = None  # type: ignore
     EpisodeSwitcherMessage = None  # type: ignore
@@ -56,17 +61,18 @@ except ImportError:
     get_episode_switcher_manager = None  # type: ignore
     set_episode_switcher_manager = None  # type: ignore
 
-# Mem0 Memory Service
+# Cognee Memory Service
 try:
-    from bot.services.mem0_memory_service import (
-        Mem0MemoryService,
-        get_memory_service as get_mem0_memory_service,
-        set_memory_service as set_mem0_memory_service,
+    from bot.services.cognee_memory_service import (
+        CogneeMemoryService,
+        get_memory_service as get_cognee_memory_service,
+        set_memory_service as set_cognee_memory_service,
     )
-except ImportError:
-    Mem0MemoryService = None  # type: ignore
-    get_mem0_memory_service = None  # type: ignore
-    set_mem0_memory_service = None  # type: ignore
+except ImportError as _e:
+    logger.warning("Failed to import cognee_memory_service: {}", _e)
+    CogneeMemoryService = None  # type: ignore
+    get_cognee_memory_service = None  # type: ignore
+    set_cognee_memory_service = None  # type: ignore
 
 # Memory Models
 try:
@@ -75,7 +81,8 @@ try:
         MemoryFact,
         MemoryType,
     )
-except ImportError:
+except ImportError as _e:
+    logger.warning("Failed to import memory_models: {}", _e)
     MemoryCategory = None  # type: ignore
     MemoryFact = None  # type: ignore
     MemoryType = None  # type: ignore
@@ -92,7 +99,8 @@ try:
         get_context_builder,
         set_context_builder,
     )
-except ImportError:
+except ImportError as _e:
+    logger.warning("Failed to import context_builder: {}", _e)
     ContextBuilder = None  # type: ignore
     ContextAssemblyConfig = None  # type: ignore
     ContextPart = None  # type: ignore
@@ -114,7 +122,8 @@ try:
         get_summarizer,
         set_summarizer,
     )
-except ImportError:
+except ImportError as _e:
+    logger.warning("Failed to import summarizer: {}", _e)
     Summarizer = None  # type: ignore
     SummarizerConfig = None  # type: ignore
     SummaryKind = None  # type: ignore
@@ -140,7 +149,8 @@ try:
         get_artifact_service,
         set_artifact_service,
     )
-except ImportError:
+except ImportError as _e:
+    logger.warning("Failed to import artifact_service: {}", _e)
     Artifact = None  # type: ignore
     ArtifactProcessingStatus = None  # type: ignore
     ArtifactService = None  # type: ignore
@@ -163,13 +173,47 @@ try:
         get_storage_backend,
         set_storage_backend,
     )
-except ImportError:
+except ImportError as _e:
+    logger.warning("Failed to import storage_backend: {}", _e)
     LocalStorageBackend = None  # type: ignore
     S3StorageBackend = None  # type: ignore
     StorageBackend = None  # type: ignore
     StorageReference = None  # type: ignore
     get_storage_backend = None  # type: ignore
     set_storage_backend = None  # type: ignore
+
+# System Prompt
+try:
+    from bot.services.system_prompt import (
+        DEFAULT_SYSTEM_PROMPT,
+        get_system_prompt,
+    )
+except ImportError as _e:
+    logger.warning("Failed to import system_prompt: {}", _e)
+    DEFAULT_SYSTEM_PROMPT = None  # type: ignore
+    get_system_prompt = None  # type: ignore
+
+# Langfuse Observability Service
+from bot.services.langfuse_service import (
+    LangfuseService,
+    get_langfuse_service,
+    set_langfuse_service,
+)
+
+# LLM Service
+try:
+    from bot.services.llm_service import (
+        LLMResponse,
+        LLMService,
+        get_llm_service,
+        set_llm_service,
+    )
+except ImportError as _e:
+    logger.warning("Failed to import llm_service: {}", _e)
+    LLMResponse = None  # type: ignore
+    LLMService = None  # type: ignore
+    get_llm_service = None  # type: ignore
+    set_llm_service = None  # type: ignore
 
 __all__ = [
     # Episode Manager Service
@@ -194,10 +238,10 @@ __all__ = [
     "SwitchDecision",
     "get_episode_switcher_manager",
     "set_episode_switcher_manager",
-    # Mem0 Memory Service
-    "Mem0MemoryService",
-    "get_mem0_memory_service",
-    "set_mem0_memory_service",
+    # Cognee Memory Service
+    "CogneeMemoryService",
+    "get_cognee_memory_service",
+    "set_cognee_memory_service",
     # Memory Models
     "MemoryCategory",
     "MemoryFact",
@@ -240,4 +284,16 @@ __all__ = [
     "StorageReference",
     "get_storage_backend",
     "set_storage_backend",
+    # System Prompt
+    "DEFAULT_SYSTEM_PROMPT",
+    "get_system_prompt",
+    # Langfuse Observability Service
+    "LangfuseService",
+    "get_langfuse_service",
+    "set_langfuse_service",
+    # LLM Service
+    "LLMResponse",
+    "LLMService",
+    "get_llm_service",
+    "set_llm_service",
 ]

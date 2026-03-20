@@ -41,7 +41,7 @@ sys.path.insert(0, str(src_path))
 
 from loguru import logger  # noqa: E402
 
-from bot.services.mem0_memory_service import get_memory_service  # noqa: E402
+from bot.services.cognee_memory_service import get_memory_service  # noqa: E402
 from bot.services.memory_cleanup import CleanupConfig, MemoryCleanupService  # noqa: E402
 
 
