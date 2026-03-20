@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -174,7 +175,7 @@ def estimate_cost_cents(model: str, tokens_in: int, tokens_out: int) -> int:
     """
     in_rate, out_rate = _MODEL_COST_PER_1K.get(model, _DEFAULT_COST_PER_1K)
     cost = (tokens_in * in_rate + tokens_out * out_rate) / 1000
-    return max(int(cost), 0)
+    return max(math.ceil(cost), 0)
 
 
 # ---------------------------------------------------------------------------

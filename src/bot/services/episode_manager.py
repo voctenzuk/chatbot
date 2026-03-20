@@ -163,6 +163,7 @@ class EpisodeManager:
         self,
         user_id: int,
         content: str,
+        episode: "Episode | None" = None,
     ) -> SwitchDecision:
         """Evaluate whether to start a new episode."""
 
@@ -182,7 +183,8 @@ class EpisodeManager:
 
         # Get last message time from database
         if self.db:
-            episode = await self.db.get_active_episode_for_user(user_id)
+            if episode is None:
+                episode = await self.db.get_active_episode_for_user(user_id)
             if episode:
                 # Check minimum episode duration
                 if hasattr(episode, "started_at") and episode.started_at:
@@ -230,14 +232,24 @@ class EpisodeManager:
             if self.db is None:
                 raise RuntimeError("Database client not configured")
 
-            # Evaluate episode switch
-            switch_decision = await self._evaluate_switch(user_id, content)
-
-            # Get or create thread
+            # Fetch thread and episode once to avoid repeated DB round-trips
             thread = await self.db.get_or_create_thread(user_id)
+            current_episode = await self.db.get_active_episode_for_user(user_id)
+
+            # Evaluate episode switch, passing the already-fetched episode
+            switch_decision = await self._evaluate_switch(user_id, content, episode=current_episode)
 
             # Handle episode switch
             if switch_decision.should_switch:
+                # Close the current episode before starting a new one
+                if current_episode is not None:
+                    await self.db.close_episode(current_episode.id)
+                    logger.info(
+                        "Closed episode {} for user {} before switch (reason: {})",
+                        current_episode.id,
+                        user_id,
+                        switch_decision.reason,
+                    )
                 episode = await self.db.start_new_episode(thread.id)
                 self._record_switch(user_id)
                 is_new_episode = True
@@ -248,11 +260,11 @@ class EpisodeManager:
                     switch_decision.reason,
                 )
             else:
-                episode = await self.db.get_active_episode_for_user(user_id)
-                if episode is None:
+                if current_episode is None:
                     episode = await self.db.start_new_episode(thread.id)
                     is_new_episode = True
                 else:
+                    episode = current_episode
                     is_new_episode = False
 
             # Persist message
@@ -354,9 +366,8 @@ class EpisodeManager:
 
             closed = await self.db.close_episode(episode.id)
 
-            if final_summary:
-                # Store summary would go here
-                pass
+            # Clear in-memory state so next message starts fresh
+            self._in_memory_manager._current_episode.pop(user_id, None)
 
             logger.info("Closed episode {} for user {}", episode.id, user_id)
             return closed

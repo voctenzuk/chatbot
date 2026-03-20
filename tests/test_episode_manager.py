@@ -422,6 +422,23 @@ class TestEpisodeLifecycle:
         assert result is None
 
     @pytest.mark.asyncio
+    async def test_close_episode_clears_in_memory_state(self, episode_manager):
+        """Closing an episode should clear in-memory state for the user."""
+        user_id = 12345
+
+        # Process a message to create episode + in-memory state
+        await episode_manager.process_user_message(user_id=user_id, content="Hello!")
+
+        # Sanity-check: in-memory state is now populated
+        assert user_id in episode_manager._in_memory_manager._current_episode
+
+        # Close the episode
+        await episode_manager.close_current_episode(user_id)
+
+        # In-memory state must be cleared
+        assert user_id not in episode_manager._in_memory_manager._current_episode
+
+    @pytest.mark.asyncio
     async def test_new_episode_after_close(self, episode_manager):
         """Test that new episode is created after closing."""
         # First episode

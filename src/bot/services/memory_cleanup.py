@@ -27,6 +27,7 @@ Tuning Knobs (via CleanupConfig):
 
 from __future__ import annotations
 
+import asyncio
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -435,23 +436,16 @@ class MemoryCleanupService:
 
             # Apply deletions if not dry run
             if not dry_run and to_delete:
-                deletion_count = 0
-                for memory_id in to_delete[: self.config.max_deletions_per_run]:
-                    try:
-                        # Placeholder for actual deletion logic via cognee API
-                        logger.debug("Would delete memory {}", memory_id)
-                        deletion_count += 1
-                    except Exception as e:
-                        logger.error("Failed to delete memory {}: {}", memory_id, e)
-                        report.errors.append(f"Failed to delete {memory_id}: {e}")
-
-                report.memories_deleted = deletion_count
-                logger.info(
-                    "Deleted {} memories for user {} (dry_run={})",
-                    deletion_count,
+                # Cognee does not support per-memory deletion yet.
+                # Log the IDs that would be deleted for future implementation.
+                capped = to_delete[: self.config.max_deletions_per_run]
+                logger.warning(
+                    "Deletion requested for {} memories for user {} but per-memory "
+                    "deletion is not yet implemented in Cognee backend",
+                    len(capped),
                     user_id,
-                    dry_run,
                 )
+                report.memories_deleted = 0  # honest: nothing actually deleted
             else:
                 logger.info(
                     "Would delete {} memories for user {} (dry_run={})",
@@ -501,18 +495,22 @@ class MemoryCleanupService:
             started_at=datetime.now(timezone.utc),
         )
 
-        for user_id in user_ids:
-            user_report = await self.cleanup_user(user_id, dry_run=dry_run)
+        tasks = [self.cleanup_user(uid, dry_run=dry_run) for uid in user_ids]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # Aggregate results
-            combined_report.total_memories_scanned += user_report.total_memories_scanned
-            combined_report.memories_kept += user_report.memories_kept
-            combined_report.memories_decayed += user_report.memories_decayed
-            combined_report.memories_expired += user_report.memories_expired
-            combined_report.memories_deleted += user_report.memories_deleted
-            combined_report.errors.extend(user_report.errors)
-            combined_report.decisions.extend(user_report.decisions)
-            combined_report.users_processed.update(user_report.users_processed)
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                combined_report.errors.append(f"User {user_ids[i]}: {result}")
+            else:
+                user_report: CleanupReport = result
+                combined_report.total_memories_scanned += user_report.total_memories_scanned
+                combined_report.memories_kept += user_report.memories_kept
+                combined_report.memories_decayed += user_report.memories_decayed
+                combined_report.memories_expired += user_report.memories_expired
+                combined_report.memories_deleted += user_report.memories_deleted
+                combined_report.errors.extend(user_report.errors)
+                combined_report.decisions.extend(user_report.decisions)
+                combined_report.users_processed.update(user_report.users_processed)
 
         combined_report.completed_at = datetime.now(timezone.utc)
 
