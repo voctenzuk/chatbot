@@ -14,40 +14,13 @@ from typing import Any
 from loguru import logger
 
 from bot.conversation.context_builder import (
+    ContextBuilder,
     ConversationMessage,
     MessageRole,
-    get_context_builder,
 )
 from bot.conversation.episode_manager import EpisodeManager, EpisodeMessage
 from bot.conversation.system_prompt import get_system_prompt
-from bot.infra.langfuse_service import get_langfuse_service
-from bot.llm.service import LLMResponse, ToolCall, get_llm_service
-
-try:
-    from bot.memory.cognee_service import get_memory_service
-
-    MEMORY_SERVICE_AVAILABLE = True
-except ImportError:
-    get_memory_service = None  # type: ignore[assignment]
-    MEMORY_SERVICE_AVAILABLE = False
-
-try:
-    from bot.infra.db_client import get_db_client
-
-    DB_CLIENT_AVAILABLE = True
-except ImportError:
-    get_db_client = None  # type: ignore[assignment]
-    DB_CLIENT_AVAILABLE = False
-
-try:
-    from bot.media.image_service import SEND_PHOTO_TOOL, get_image_service
-
-    IMAGE_SERVICE_AVAILABLE = True
-except ImportError:
-    SEND_PHOTO_TOOL = None  # type: ignore[assignment]
-    get_image_service = None  # type: ignore[assignment]
-    IMAGE_SERVICE_AVAILABLE = False
-
+from bot.llm.service import LLMResponse, LLMService, ToolCall
 
 _LLM_FALLBACK = "Прости, у меня сейчас не получается ответить. Попробуй ещё раз чуть позже."
 
@@ -57,8 +30,6 @@ _ROLE_MAP = {
     "system": MessageRole.SYSTEM,
 }
 
-# Counter for scheduling periodic cognify() calls
-_memory_write_counts: dict[int, int] = {}
 _COGNIFY_EVERY_N_WRITES: int = 10
 
 
@@ -75,20 +46,43 @@ class ChatResult:
 class ChatPipeline:
     """Core chat logic: receive message -> produce response.
 
-    Zero aiogram imports. All services received via constructor or
-    module-level singletons (get_*() pattern).
+    Zero aiogram imports. All services received via constructor.
     """
 
-    def __init__(self, episode_manager: EpisodeManager) -> None:
+    def __init__(
+        self,
+        *,
+        llm: LLMService,
+        episode_manager: EpisodeManager,
+        context_builder: ContextBuilder,
+        langfuse: Any,
+        memory: Any | None = None,
+        image_service: Any | None = None,
+        db_client: Any | None = None,
+    ) -> None:
+        self._llm = llm
         self._episode_manager = episode_manager
+        self._context_builder = context_builder
+        self._langfuse = langfuse
+        self._memory = memory
+        self._image_service = image_service
+        self._db_client = db_client
         self._background_tasks: set[asyncio.Task[Any]] = set()
-        self._generated_images: dict[str, bytes] = {}  # cache from tool loop
+        self._memory_write_counts: dict[int, int] = {}
 
     def _fire_and_forget(self, coro: Any) -> None:
         """Schedule a coroutine as a background task with reference tracking."""
         task = asyncio.create_task(coro)
         self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
+        task.add_done_callback(self._on_background_task_done)
+
+    def _on_background_task_done(self, task: asyncio.Task[Any]) -> None:
+        self._background_tasks.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error("Background task failed: {}", exc)
 
     async def handle_message(
         self,
@@ -117,10 +111,9 @@ class ChatPipeline:
         )
 
         # 2. Check rate limit (fail open on errors)
-        if DB_CLIENT_AVAILABLE and get_db_client is not None:
+        if self._db_client is not None:
             try:
-                db = get_db_client()
-                allowed = await db.check_rate_limit(user_id)
+                allowed = await self._db_client.check_rate_limit(user_id)
                 if not allowed:
                     return ChatResult(
                         response_text=(
@@ -133,11 +126,13 @@ class ChatPipeline:
                 logger.warning("Rate limit check failed for user {}, allowing: {}", user_id, exc)
 
         # 3. Generate LLM response
+        generated_images: dict[str, bytes] = {}
         try:
             llm_response = await self._generate_llm_response(
                 user_id=user_id,
                 content=content,
                 user_name=user_name,
+                generated_images=generated_images,
             )
             response = llm_response.content
         except Exception as llm_exc:
@@ -149,8 +144,8 @@ class ChatPipeline:
         image_bytes: bytes | None = None
         if llm_response is not None and llm_response.tool_calls:
             for tool_call in llm_response.tool_calls:
-                if tool_call.name == "send_photo" and tool_call.id in self._generated_images:
-                    image_bytes = self._generated_images.pop(tool_call.id)
+                if tool_call.name == "send_photo" and tool_call.id in generated_images:
+                    image_bytes = generated_images.pop(tool_call.id)
                     break
 
         # 5. Persist assistant response + track usage
@@ -168,10 +163,9 @@ class ChatPipeline:
                 content=response,
             )
 
-        if DB_CLIENT_AVAILABLE and get_db_client is not None and llm_response is not None:
+        if self._db_client is not None and llm_response is not None:
             try:
-                db = get_db_client()
-                await db.increment_usage(
+                await self._db_client.increment_usage(
                     user_id,
                     msg_count=1,
                     tokens_in=llm_response.tokens_in,
@@ -181,13 +175,10 @@ class ChatPipeline:
                 logger.warning("Usage tracking failed for user {}: {}", user_id, exc)
 
         # 6. Write to long-term memory (fire-and-forget)
-        if MEMORY_SERVICE_AVAILABLE and get_memory_service is not None and llm_response is not None:
+        if self._memory is not None and llm_response is not None:
             try:
-                mem_service = get_memory_service()
                 memory_content = f"Пользователь: {content}\nПодруга: {response}"
-                self._fire_and_forget(
-                    self._write_memory_background(mem_service, memory_content, user_id)
-                )
+                self._fire_and_forget(self._write_memory_background(memory_content, user_id))
             except Exception as exc:
                 logger.warning("Memory write failed for user {}: {}", user_id, exc)
 
@@ -206,20 +197,24 @@ class ChatPipeline:
         user_id: int,
         content: str,
         user_name: str | None,
+        generated_images: dict[str, bytes] | None = None,
     ) -> LLMResponse:
         """Build context and call LLM to produce a reply."""
+        if generated_images is None:
+            generated_images = {}
+
         episode = await self._episode_manager.get_current_episode(user_id)
-        lf_config = get_langfuse_service().create_config(
+        lf_config = self._langfuse.create_config(
             user_id=user_id,
             session_id=episode.id if episode is not None else None,
             trace_name="chat",
         )
 
         # Fetch semantic memories (best-effort)
-        memories = []
-        if MEMORY_SERVICE_AVAILABLE and get_memory_service is not None:
+        memories: list[Any] = []
+        if self._memory is not None:
             try:
-                memories = await get_memory_service().search(
+                memories = await self._memory.search(
                     query=content,
                     user_id=user_id,
                     limit=5,
@@ -233,7 +228,7 @@ class ChatPipeline:
 
         # Assemble LLM messages via context builder
         system_prompt = get_system_prompt(user_name=user_name)
-        llm_messages = get_context_builder().assemble_for_llm(
+        llm_messages = self._context_builder.assemble_for_llm(
             recent_messages=recent_messages,
             semantic_memories=memories,
             query=content,
@@ -241,15 +236,19 @@ class ChatPipeline:
         )
 
         # First LLM call (with image tool if available)
-        tools = [SEND_PHOTO_TOOL] if IMAGE_SERVICE_AVAILABLE and SEND_PHOTO_TOOL else None
-        llm_svc = get_llm_service()
-        llm_response = await llm_svc.generate(llm_messages, tools=tools, config=lf_config)
+        tools = None
+        if self._image_service is not None:
+            from bot.media.image_service import SEND_PHOTO_TOOL
+
+            tools = [SEND_PHOTO_TOOL]
+
+        llm_response = await self._llm.generate(llm_messages, tools=tools, config=lf_config)
 
         # Tool execution loop
         if llm_response.tool_calls and tools:
             tool_messages: list[dict[str, str]] = []
             for tc in llm_response.tool_calls:
-                result_text = await self._execute_tool_for_loop(tc, user_id)
+                result_text = await self._execute_tool_for_loop(tc, user_id, generated_images)
                 tool_messages.append(
                     {
                         "role": "tool",
@@ -270,7 +269,7 @@ class ChatPipeline:
                 *tool_messages,
             ]
 
-            final_response = await llm_svc.generate(follow_up, config=lf_config)
+            final_response = await self._llm.generate(follow_up, config=lf_config)
 
             return LLMResponse(
                 content=final_response.content,
@@ -282,35 +281,40 @@ class ChatPipeline:
 
         return llm_response
 
-    async def _execute_tool_for_loop(self, tool_call: ToolCall, user_id: int) -> str:
+    async def _execute_tool_for_loop(
+        self,
+        tool_call: ToolCall,
+        user_id: int,
+        generated_images: dict[str, bytes],
+    ) -> str:
         """Execute a tool call and return a result string for the LLM.
 
-        Generated images are cached in self._generated_images so handle_message
+        Generated images are cached in generated_images so handle_message
         can deliver them without re-generating (avoids double API cost).
         """
         if tool_call.name == "send_photo":
             try:
-                if IMAGE_SERVICE_AVAILABLE and get_image_service is not None:
+                if self._image_service is not None:
                     prompt = tool_call.args.get("prompt", "")
-                    image_bytes = await get_image_service().generate(prompt, user_id)
+                    image_bytes = await self._image_service.generate(prompt, user_id)
                     if image_bytes is not None:
-                        self._generated_images[tool_call.id] = image_bytes
+                        generated_images[tool_call.id] = image_bytes
                         return f"Photo generated successfully for prompt: {prompt[:50]}"
                 return "Image service unavailable"
             except Exception as e:
                 return f"Image generation failed: {e}"
         return f"Unknown tool: {tool_call.name}"
 
-    async def _write_memory_background(
-        self, mem_service: Any, memory_content: str, user_id: int
-    ) -> None:
+    async def _write_memory_background(self, memory_content: str, user_id: int) -> None:
         """Write to long-term memory in background. Fire-and-forget."""
+        if self._memory is None:
+            return
         try:
-            await mem_service.write_factual(content=memory_content, user_id=user_id)
+            await self._memory.write_factual(content=memory_content, user_id=user_id)
 
-            _memory_write_counts[user_id] = _memory_write_counts.get(user_id, 0) + 1
-            if _memory_write_counts[user_id] >= _COGNIFY_EVERY_N_WRITES:
-                _memory_write_counts[user_id] = 0
+            self._memory_write_counts[user_id] = self._memory_write_counts.get(user_id, 0) + 1
+            if self._memory_write_counts[user_id] >= _COGNIFY_EVERY_N_WRITES:
+                self._memory_write_counts[user_id] = 0
                 self._fire_and_forget(self._run_cognify_background())
         except Exception as exc:
             logger.warning("Background memory write failed for user {}: {}", user_id, exc)
@@ -318,8 +322,8 @@ class ChatPipeline:
     async def _run_cognify_background(self) -> None:
         """Run cognify in background to build knowledge graph."""
         try:
-            if MEMORY_SERVICE_AVAILABLE and get_memory_service is not None:
-                await get_memory_service().cognify()
+            if self._memory is not None:
+                await self._memory.cognify()
                 logger.info("Background cognify completed successfully")
         except Exception as exc:
             logger.warning("Background cognify failed: {}", exc)
