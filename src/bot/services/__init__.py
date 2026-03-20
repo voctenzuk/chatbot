@@ -194,14 +194,11 @@ except ImportError as _e:
     get_system_prompt = None  # type: ignore
 
 # Langfuse Observability Service
-try:
-    from bot.services.langfuse_service import (
-        LangfuseService,
-        get_langfuse_service,
-        set_langfuse_service,
-    )
-except ImportError:
-    pass
+from bot.services.langfuse_service import (
+    LangfuseService,
+    get_langfuse_service,
+    set_langfuse_service,
+)
 
 # LLM Service
 try:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -148,37 +147,6 @@ class LLMService:
             else:
                 result.append(HumanMessage(content=content))
         return result
-
-
-# ---------------------------------------------------------------------------
-# Cost estimation
-# ---------------------------------------------------------------------------
-
-# Token pricing per 1K tokens (in cents). Update when models/providers change.
-_MODEL_COST_PER_1K: dict[str, tuple[float, float]] = {
-    # model_name: (input_cents_per_1k, output_cents_per_1k)
-    "kimi-k2p5": (0.1, 0.3),
-}
-_DEFAULT_COST_PER_1K: tuple[float, float] = (0.1, 0.3)
-
-
-def estimate_cost_cents(model: str, tokens_in: int, tokens_out: int) -> int:
-    """Estimate API cost in cents from token counts.
-
-    Uses per-model rates where known, falls back to default.
-    Returns 0 for unknown/zero token counts.
-
-    Args:
-        model: Model name string (from LLMResponse.model).
-        tokens_in: Input token count.
-        tokens_out: Output token count.
-
-    Returns:
-        Estimated cost in cents (integer, minimum 0).
-    """
-    in_rate, out_rate = _MODEL_COST_PER_1K.get(model, _DEFAULT_COST_PER_1K)
-    cost = (tokens_in * in_rate + tokens_out * out_rate) / 1000
-    return max(math.ceil(cost), 0)
 
 
 # ---------------------------------------------------------------------------

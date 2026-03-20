@@ -255,32 +255,6 @@ class TestDbClientProvisioning:
 # ---------------------------------------------------------------------------
 
 
-class TestCostCalculation:
-    """Tests for estimate_cost_cents function."""
-
-    def test_known_model_cost(self) -> None:
-        """kimi-k2p5 uses specific rates."""
-        from bot.services.llm_service import estimate_cost_cents
-
-        # 10000 * 0.1 / 1000 + 5000 * 0.3 / 1000 = 1.0 + 1.5 = 2.5 -> int(2.5) = 2
-        result = estimate_cost_cents("kimi-k2p5", 10000, 5000)
-        assert result == 2
-
-    def test_unknown_model_uses_default(self) -> None:
-        """Unknown model falls back to default rates."""
-        from bot.services.llm_service import estimate_cost_cents
-
-        # Same default rates -> same result
-        result = estimate_cost_cents("unknown-model", 10000, 5000)
-        assert result == 2
-
-    def test_zero_tokens_returns_zero(self) -> None:
-        """Zero tokens -> zero cost."""
-        from bot.services.llm_service import estimate_cost_cents
-
-        assert estimate_cost_cents("kimi-k2p5", 0, 0) == 0
-
-
 # ---------------------------------------------------------------------------
 # TestHandlerMonetization — fixtures & helpers
 # ---------------------------------------------------------------------------
@@ -375,6 +349,10 @@ def patched_handlers(
         patch(
             "bot.handlers.get_db_client",
             return_value=mock_db_client,
+        ),
+        patch(
+            "bot.handlers.get_langfuse_service",
+            return_value=MagicMock(create_config=MagicMock(return_value={})),
         ),
     ):
         yield {

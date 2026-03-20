@@ -4,46 +4,23 @@ from __future__ import annotations
 
 from typing import Any
 
+from langfuse import Langfuse
+from langfuse.langchain import CallbackHandler
 from loguru import logger
 
 from bot.config import settings
 
-try:
-    from langfuse.callback import CallbackHandler
-
-    LANGFUSE_AVAILABLE = True
-except ImportError:
-    LANGFUSE_AVAILABLE = False
-    CallbackHandler = None  # type: ignore[assignment, misc]
-
 
 class LangfuseService:
-    """Manages Langfuse tracing via per-request LangChain callback handlers.
-
-    Gracefully unavailable if langfuse package not installed or keys not configured.
-    """
+    """Manages Langfuse tracing via per-request LangChain callback handlers."""
 
     def __init__(self) -> None:
-        self._available = False
-
-        if not LANGFUSE_AVAILABLE:
-            logger.info("LangfuseService: langfuse package not installed")
-            return
-
-        if not settings.langfuse_enabled:
-            logger.info("LangfuseService: disabled via LANGFUSE_ENABLED=false")
-            return
-
-        if not settings.langfuse_public_key or not settings.langfuse_secret_key:
-            logger.info("LangfuseService: keys not configured, tracing disabled")
-            return
-
-        self._available = True
+        self._client = Langfuse(
+            public_key=settings.langfuse_public_key,
+            secret_key=settings.langfuse_secret_key,
+            host=settings.langfuse_base_url,
+        )
         logger.info("LangfuseService initialized (host={})", settings.langfuse_base_url)
-
-    @property
-    def available(self) -> bool:
-        return self._available
 
     def create_handler(
         self,
@@ -52,15 +29,8 @@ class LangfuseService:
         trace_name: str = "chat",
         tags: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> Any | None:
-        """Create a per-request CallbackHandler for LangChain.
-
-        Returns:
-            CallbackHandler instance or None if unavailable.
-        """
-        if not self._available or CallbackHandler is None:
-            return None
-
+    ) -> CallbackHandler:
+        """Create a per-request CallbackHandler for LangChain."""
         return CallbackHandler(
             public_key=settings.langfuse_public_key,
             secret_key=settings.langfuse_secret_key,
@@ -80,33 +50,14 @@ class LangfuseService:
         tags: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Create a config dict for LangChain .ainvoke(config=...).
-
-        Returns empty dict if unavailable (safe to pass to ainvoke).
-        """
+        """Create a config dict for LangChain .ainvoke(config=...)."""
         handler = self.create_handler(user_id, session_id, trace_name, tags, metadata)
-        if handler is None:
-            return {}
         return {"callbacks": [handler]}
 
     def flush(self) -> None:
         """Flush pending events. Call on shutdown."""
-        if not self._available:
-            return
-        # Each CallbackHandler flushes on __del__, but we can force it
-        # by importing and flushing the global client if available
-        try:
-            from langfuse import Langfuse
-
-            client = Langfuse(
-                public_key=settings.langfuse_public_key,
-                secret_key=settings.langfuse_secret_key,
-                host=settings.langfuse_base_url,
-            )
-            client.flush()
-            client.shutdown()
-        except Exception as e:
-            logger.warning("Langfuse flush failed: {}", e)
+        self._client.flush()
+        self._client.shutdown()
 
 
 # DI helpers

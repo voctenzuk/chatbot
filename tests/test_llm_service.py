@@ -9,7 +9,6 @@ import pytest
 from bot.services.llm_service import (
     LLMResponse,
     LLMService,
-    estimate_cost_cents,
     get_llm_service,
     set_llm_service,
 )
@@ -156,25 +155,6 @@ class TestMessageConversion:
         assert len(result[0].tool_calls) == 1
         assert result[0].tool_calls[0]["name"] == "send_photo"
         assert result[0].tool_calls[0]["args"] == {"prompt": "cat"}
-
-
-class TestEstimateCostCents:
-    """Tests for cost estimation."""
-
-    def test_small_usage_not_zero(self):
-        """Small token counts should produce at least 1 cent, not 0."""
-        cost = estimate_cost_cents("unknown-model", tokens_in=100, tokens_out=50)
-        assert cost >= 1  # was 0 before fix
-
-    def test_zero_tokens_returns_zero(self):
-        """Zero tokens should return 0 cost."""
-        cost = estimate_cost_cents("unknown-model", tokens_in=0, tokens_out=0)
-        assert cost == 0
-
-    def test_large_usage(self):
-        """Large token counts should produce correct cost."""
-        cost = estimate_cost_cents("unknown-model", tokens_in=10000, tokens_out=5000)
-        assert cost > 0
 
 
 class TestLLMServiceSingleton:

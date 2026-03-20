@@ -443,18 +443,12 @@ async def chat(message: Message) -> None:
 
         if DB_CLIENT_AVAILABLE and get_db_client is not None and llm_response is not None:
             try:
-                from bot.services.llm_service import estimate_cost_cents
-
                 db = get_db_client()
-                cost = estimate_cost_cents(
-                    llm_response.model, llm_response.tokens_in, llm_response.tokens_out
-                )
                 await db.increment_usage(
                     user_id,
                     msg_count=1,
                     tokens_in=llm_response.tokens_in,
                     tokens_out=llm_response.tokens_out,
-                    cost_cents=cost,
                 )
             except Exception as exc:
                 logger.warning("Usage tracking failed for user {}: {}", user_id, exc)
