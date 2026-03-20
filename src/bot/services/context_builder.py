@@ -239,7 +239,7 @@ class ContextBuilder:
                 pruned.append(part)
                 total_tokens += part_tokens
             else:
-                break
+                continue
 
         return pruned
 
@@ -568,7 +568,41 @@ class ContextBuilder:
             for msg in recent_messages[-self.config.max_recent_messages :]:
                 messages.append(msg.to_dict())
 
-        return messages
+        return self._trim_final_messages(messages)
+
+    def _trim_final_messages(self, messages: list[dict[str, str]]) -> list[dict[str, str]]:
+        """Apply LangChain trim_messages as a final guardrail against overflow."""
+        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+        from langchain_core.messages.utils import (
+            count_tokens_approximately,
+            trim_messages,
+        )
+
+        role_cls = {
+            "system": SystemMessage,
+            "assistant": AIMessage,
+            "user": HumanMessage,
+        }
+        lc_messages = [
+            role_cls.get(m["role"], HumanMessage)(content=m.get("content", "")) for m in messages
+        ]
+
+        trimmed = trim_messages(
+            lc_messages,
+            strategy="last",
+            token_counter=count_tokens_approximately,
+            max_tokens=self.config.max_total_tokens,
+            include_system=True,
+        )
+
+        role_name = {
+            SystemMessage: "system",
+            AIMessage: "assistant",
+            HumanMessage: "user",
+        }
+        return [
+            {"role": role_name.get(type(m), "user"), "content": str(m.content)} for m in trimmed
+        ]
 
 
 # Global instance for dependency injection

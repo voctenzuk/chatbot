@@ -686,6 +686,50 @@ class TestAssembleForLLM:
         assert chat_msgs[1]["content"] == "Hi!"
 
 
+class TestTrimFinalMessages:
+    """Tests for trim_messages guardrail."""
+
+    def test_trim_caps_output(self):
+        """trim_messages guardrail should cap the output to max_total_tokens."""
+        config = ContextAssemblyConfig(max_total_tokens=50)
+        builder = ContextBuilder(config)
+
+        messages_list = [
+            ConversationMessage(role=MessageRole.USER, content="Hello " * 100),
+            ConversationMessage(role=MessageRole.ASSISTANT, content="Response " * 100),
+            ConversationMessage(role=MessageRole.USER, content="More " * 100),
+        ]
+
+        result = builder.assemble_for_llm(
+            recent_messages=messages_list,
+            system_prompt="System",
+        )
+
+        # System message should be preserved (include_system=True)
+        system_msgs = [m for m in result if m["role"] == "system"]
+        assert len(system_msgs) >= 1
+        # Total messages should be trimmed (fewer than system + 3 chat)
+        assert len(result) < 4
+
+    def test_trim_preserves_all_when_within_budget(self):
+        """When within token budget, all messages are preserved."""
+        config = ContextAssemblyConfig(max_total_tokens=4000)
+        builder = ContextBuilder(config)
+
+        messages_list = [
+            ConversationMessage(role=MessageRole.USER, content="Hi"),
+            ConversationMessage(role=MessageRole.ASSISTANT, content="Hello!"),
+        ]
+
+        result = builder.assemble_for_llm(
+            recent_messages=messages_list,
+            system_prompt="System",
+        )
+
+        # System + 2 chat messages = 3 total
+        assert len(result) == 3
+
+
 class TestGlobalInstance:
     """Tests for global ContextBuilder instance management."""
 

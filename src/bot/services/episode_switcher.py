@@ -9,7 +9,6 @@ This module provides automatic episode switching based on:
 from __future__ import annotations
 
 import math
-import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Protocol
@@ -85,31 +84,28 @@ class SimpleEmbeddingProvider:
 
 
 class OpenAIEmbeddingProvider:
-    """OpenAI/OpenRouter embedding provider."""
+    """OpenAI embedding provider using LangChain OpenAIEmbeddings wrapper."""
 
-    def __init__(self, api_key: str | None = None, model: str = "text-embedding-3-small") -> None:
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
-        self.model = model
-        self._client = None
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = "text-embedding-3-small",
+    ) -> None:
+        from langchain_openai import OpenAIEmbeddings
+
+        from bot.config import settings
+
+        self._embeddings = OpenAIEmbeddings(
+            model=model,
+            api_key=api_key or settings.llm_api_key,  # type: ignore[arg-type]
+            base_url=settings.llm_base_url,
+        )
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        """Embed texts using OpenAI API."""
-        if self._client is None:
-            try:
-                import openai
-
-                self._client = openai.AsyncOpenAI(
-                    api_key=self.api_key,
-                    base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-                )
-            except ImportError:
-                raise RuntimeError("openai package is required for OpenAIEmbeddingProvider")
-
-        response = await self._client.embeddings.create(
-            model=self.model,
-            input=texts,
-        )
-        return [item.embedding for item in response.data]
+        """Embed texts using LangChain OpenAIEmbeddings."""
+        if not texts:
+            return []
+        return await self._embeddings.aembed_documents(texts)
 
 
 @dataclass

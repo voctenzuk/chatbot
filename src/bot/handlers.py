@@ -22,7 +22,7 @@ from bot.services.episode_manager import (
     get_episode_manager,
     set_episode_manager,
 )
-from bot.services.llm_service import LLMResponse, get_llm_service
+from bot.services.llm_service import LLMResponse, ToolCall, get_llm_service
 from bot.services.system_prompt import get_system_prompt
 
 try:
@@ -126,6 +126,25 @@ def _episode_messages_to_conversation(
     ]
 
 
+async def _execute_tool_for_loop(tool_call: ToolCall, user_id: int) -> str:
+    """Execute a tool call and return a result string for the LLM.
+
+    Only produces the text result that goes back to the LLM.  Actual Telegram
+    delivery (e.g. sending the photo) is handled by the chat() handler.
+    """
+    if tool_call.name == "send_photo":
+        try:
+            if IMAGE_SERVICE_AVAILABLE and get_image_service is not None:
+                prompt = tool_call.args.get("prompt", "")
+                image_bytes = await get_image_service().generate(prompt, user_id)
+                if image_bytes is not None:
+                    return f"Photo generated successfully for prompt: {prompt[:50]}"
+            return "Image service unavailable"
+        except Exception as e:
+            return f"Image generation failed: {e}"
+    return f"Unknown tool: {tool_call.name}"
+
+
 async def _generate_llm_response(
     user_id: int,
     content: str,
@@ -158,9 +177,50 @@ async def _generate_llm_response(
         system_prompt=system_prompt,
     )
 
-    # 4. Call LLM (with image tool if available)
+    # 4. First LLM call (with image tool if available)
     tools = [SEND_PHOTO_TOOL] if IMAGE_SERVICE_AVAILABLE and SEND_PHOTO_TOOL else None
-    return await get_llm_service().generate(llm_messages, tools=tools)
+    llm_svc = get_llm_service()
+    llm_response = await llm_svc.generate(llm_messages, tools=tools)
+
+    # 5. Tool execution loop: if LLM requested tools, run them and call LLM again
+    if llm_response.tool_calls and tools:
+        tool_messages: list[dict[str, str]] = []
+        for tc in llm_response.tool_calls:
+            result_text = await _execute_tool_for_loop(tc, user_id)
+            tool_messages.append(
+                {
+                    "role": "tool",
+                    "content": result_text,
+                    "tool_call_id": tc.id,
+                }
+            )
+
+        # Rebuild conversation: original messages + assistant turn with tool_calls + results
+        follow_up: list[dict[str, str]] = llm_messages + [
+            {
+                "role": "assistant",
+                "content": llm_response.content or "",
+                "tool_calls": [  # type: ignore[list-item]
+                    {"name": tc.name, "args": tc.args, "id": tc.id}
+                    for tc in llm_response.tool_calls
+                ],
+            },
+            *tool_messages,
+        ]
+
+        # Second LLM call without tools to prevent an infinite loop
+        final_response = await llm_svc.generate(follow_up)
+
+        # Merge: carry tool_calls from first response so chat() can deliver the photo
+        return LLMResponse(
+            content=final_response.content,
+            model=final_response.model,
+            tokens_in=llm_response.tokens_in + final_response.tokens_in,
+            tokens_out=llm_response.tokens_out + final_response.tokens_out,
+            tool_calls=llm_response.tool_calls,
+        )
+
+    return llm_response
 
 
 async def _run_cognify_background() -> None:

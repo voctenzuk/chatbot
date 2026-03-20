@@ -6,7 +6,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from loguru import logger
 
 from bot.config import settings
@@ -123,7 +129,18 @@ class LLMService:
             if role == "system":
                 result.append(SystemMessage(content=content))
             elif role == "assistant":
-                result.append(AIMessage(content=content))
+                tool_calls = msg.get("tool_calls", [])  # type: ignore[arg-type]
+                if tool_calls:
+                    result.append(AIMessage(content=content, tool_calls=tool_calls))
+                else:
+                    result.append(AIMessage(content=content))
+            elif role == "tool":
+                result.append(
+                    ToolMessage(
+                        content=content,
+                        tool_call_id=msg.get("tool_call_id", ""),
+                    )
+                )
             else:
                 result.append(HumanMessage(content=content))
         return result

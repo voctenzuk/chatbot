@@ -11,7 +11,6 @@ ARCHITECTURE/MEMORY_DESIGN.md.
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -29,7 +28,7 @@ class LLMProvider(Protocol):
 
 
 class SimpleLLMProvider:
-    """Simple LLM provider using OpenAI-compatible API."""
+    """LLM provider using LangChain ChatOpenAI wrapper."""
 
     def __init__(
         self,
@@ -37,30 +36,23 @@ class SimpleLLMProvider:
         model: str = "gpt-4o-mini",
         base_url: str | None = None,
     ) -> None:
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
-        self.model = model
-        self.base_url = base_url or os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-        self._client = None
+        from langchain_openai import ChatOpenAI
+
+        from bot.config import settings
+
+        self._model = ChatOpenAI(
+            model=model,
+            api_key=api_key or settings.llm_api_key,
+            base_url=base_url or settings.llm_base_url,
+        )
 
     async def generate(self, prompt: str, temperature: float = 0.7) -> str:
-        """Generate text using OpenAI API."""
-        if self._client is None:
-            try:
-                import openai
+        """Generate text using LangChain ChatOpenAI."""
+        from langchain_core.messages import HumanMessage
 
-                self._client = openai.AsyncOpenAI(
-                    api_key=self.api_key,
-                    base_url=self.base_url,
-                )
-            except ImportError:
-                raise RuntimeError("openai package is required for SimpleLLMProvider")
-
-        response = await self._client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=temperature,
-        )
-        return response.choices[0].message.content or ""
+        model = self._model.bind(temperature=temperature)
+        result = await model.ainvoke([HumanMessage(content=prompt)])
+        return str(result.content)
 
 
 class SummaryKind(Enum):

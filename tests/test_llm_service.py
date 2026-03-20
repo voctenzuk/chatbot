@@ -124,6 +124,38 @@ class TestMessageConversion:
         assert result[1].content == "Hi"
         assert result[2].content == "Hello"
 
+    def test_tool_message_conversion(self):
+        """Tool role dicts become ToolMessage."""
+        from langchain_core.messages import ToolMessage
+
+        svc = LLMService(model=MagicMock())
+        messages = [
+            {"role": "tool", "content": "Image generated", "tool_call_id": "call_123"},
+        ]
+        result = svc._convert_messages(messages)
+
+        assert len(result) == 1
+        assert isinstance(result[0], ToolMessage)
+        assert result[0].content == "Image generated"
+        assert result[0].tool_call_id == "call_123"
+
+    def test_assistant_with_tool_calls_conversion(self):
+        """Assistant messages with tool_calls are preserved."""
+        from langchain_core.messages import AIMessage
+
+        svc = LLMService(model=MagicMock())
+        tool_calls = [{"name": "send_photo", "args": {"prompt": "cat"}, "id": "call_1"}]
+        messages = [
+            {"role": "assistant", "content": "", "tool_calls": tool_calls},
+        ]
+        result = svc._convert_messages(messages)
+
+        assert len(result) == 1
+        assert isinstance(result[0], AIMessage)
+        assert len(result[0].tool_calls) == 1
+        assert result[0].tool_calls[0]["name"] == "send_photo"
+        assert result[0].tool_calls[0]["args"] == {"prompt": "cat"}
+
 
 class TestLLMServiceSingleton:
     """Tests for DI get/set pattern."""
