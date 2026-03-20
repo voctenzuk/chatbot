@@ -3,11 +3,14 @@
 Generates images from text prompts and returns raw bytes for sending
 via Telegram bot.send_photo(). Uses gpt-image-1 by default.
 
-Architecture:
-    LLM response includes [SEND_PHOTO: description]
+Architecture (tool calling):
+    LLM receives send_photo tool definition
            │
            ▼
-    ImageService.generate(description)
+    LLM returns tool_call: send_photo(prompt="...")
+           │
+           ▼
+    ImageService.generate(prompt)
            │
            ▼
     OpenAI Images API (gpt-image-1)
@@ -33,10 +36,27 @@ except ImportError:
     OPENAI_AVAILABLE = False
     AsyncOpenAI = None  # type: ignore[assignment, misc]
 
-import re
-
 _MAX_IMAGES_PER_DAY = 5
-_PHOTO_MARKER_RE = re.compile(r"\[SEND_PHOTO:\s*(.+?)\]", re.IGNORECASE)
+
+# Tool schema for LangChain bind_tools() — bare dict format (no "type"/"function" wrapper)
+SEND_PHOTO_TOOL = {
+    "name": "send_photo",
+    "description": (
+        "Send a photo to the user. Use sparingly and contextually: "
+        "selfies, food photos, scenery, mood photos. "
+        "Describe the image in English for the image generator."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "prompt": {
+                "type": "string",
+                "description": "Image description in English for the image generator",
+            }
+        },
+        "required": ["prompt"],
+    },
+}
 
 
 class ImageService:
@@ -55,13 +75,17 @@ class ImageService:
             logger.warning("ImageService: openai package not installed")
             return
 
-        if not settings.openai_api_key:
+        if not settings.image_api_key:
             self._client = None
-            logger.warning("ImageService: OPENAI_API_KEY not configured")
+            logger.warning("ImageService: IMAGE_API_KEY not configured")
             return
 
-        self._client = AsyncOpenAI(api_key=settings.openai_api_key)
-        self._model = settings.openai_image_model
+        kwargs: dict = {"api_key": settings.image_api_key}
+        if settings.image_base_url:
+            kwargs["base_url"] = settings.image_base_url
+
+        self._client = AsyncOpenAI(**kwargs)
+        self._model = settings.image_model
         logger.info("ImageService initialized with model={}", self._model)
 
     @property
@@ -132,26 +156,6 @@ class ImageService:
         except Exception as exc:
             logger.warning("Image generation failed for user {}: {}", user_id, exc)
             return None
-
-
-def extract_photo_prompt(text: str) -> tuple[str, str | None]:
-    """Extract [SEND_PHOTO: description] marker from LLM response.
-
-    Args:
-        text: Full LLM response text.
-
-    Returns:
-        Tuple of (clean_text, photo_prompt). photo_prompt is None if no marker found.
-        clean_text has the marker removed.
-    """
-    match = _PHOTO_MARKER_RE.search(text)
-    if match:
-        photo_prompt = match.group(1).strip()
-        cleaned = _PHOTO_MARKER_RE.sub("", text).strip()
-        if not photo_prompt:
-            return text, None
-        return cleaned, photo_prompt
-    return text, None
 
 
 # ---------------------------------------------------------------------------

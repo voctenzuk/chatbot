@@ -8,7 +8,10 @@ Tests cover:
 - Anti-flap mechanisms
 """
 
-from datetime import datetime, timedelta
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -59,7 +62,7 @@ def mock_db_client():
             threads[user_id] = Thread(
                 id=thread_id,
                 telegram_user_id=user_id,
-                created_at=datetime.now(),
+                created_at=datetime.now(tz=timezone.utc),
             )
         return threads[user_id]
 
@@ -79,7 +82,7 @@ def mock_db_client():
             id=episode_id,
             thread_id=thread_id,
             status="active",
-            started_at=datetime.now(),
+            started_at=datetime.now(tz=timezone.utc),
             topic_label=topic_label,
         )
         episodes[episode_id] = episode
@@ -94,7 +97,7 @@ def mock_db_client():
     async def close_episode(episode_id: str) -> Episode:
         episode = episodes[episode_id]
         episode.status = "closed"
-        episode.ended_at = datetime.now()
+        episode.ended_at = datetime.now(tz=timezone.utc)
         # Clear the thread's active episode
         for t in threads.values():
             if t.active_episode_id == episode_id:
@@ -124,13 +127,13 @@ def mock_db_client():
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             model=model,
-            created_at=datetime.now(),
+            created_at=datetime.now(tz=timezone.utc),
         )
         messages[message_id] = message
 
         # Update episode's last_user_message_at if user message
         if role == "user" and episode_id in episodes:
-            episodes[episode_id].last_user_message_at = datetime.now()
+            episodes[episode_id].last_user_message_at = datetime.now(tz=timezone.utc)
 
         return message
 
@@ -271,7 +274,7 @@ class TestEpisodeSwitching:
 
         # Simulate time passing by modifying the episode's last_user_message_at
         episode = await mock_db_client.get_active_episode_for_user(12345)
-        episode.last_user_message_at = datetime.now() - timedelta(hours=2)
+        episode.last_user_message_at = datetime.now(tz=timezone.utc) - timedelta(hours=2)
 
         # Second message after time gap
         result2 = await episode_manager.process_user_message(
@@ -355,7 +358,7 @@ class TestAntiFlap:
 
         # Try to trigger new episode after 2 minutes
         episode = await mock_db_client.get_active_episode_for_user(12345)
-        episode.started_at = datetime.now() - timedelta(minutes=2)
+        episode.started_at = datetime.now(tz=timezone.utc) - timedelta(minutes=2)
 
         result = await manager.process_user_message(
             user_id=12345,
@@ -379,7 +382,7 @@ class TestAntiFlap:
         for i in range(5):
             episode = await mock_db_client.get_active_episode_for_user(12345)
             if episode:
-                episode.last_user_message_at = datetime.now() - timedelta(seconds=2)
+                episode.last_user_message_at = datetime.now(tz=timezone.utc) - timedelta(seconds=2)
 
             _ = await manager.process_user_message(
                 user_id=12345,
@@ -634,3 +637,34 @@ class TestEdgeCases:
 
         # All episodes should be different
         assert len(set(episodes)) == len(users)
+
+
+class TestConcurrency:
+    """Tests for per-user lock serialization."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_messages_serialized(self, episode_manager, mock_db_client):
+        """Two concurrent messages from the same user should not create duplicate episodes."""
+        start_new_episode_calls: list[str] = []
+        original_start = mock_db_client.start_new_episode
+
+        async def tracking_start_new_episode(thread_id: str, topic_label: str | None = None):
+            result = await original_start(thread_id, topic_label)
+            start_new_episode_calls.append(result.id)
+            return result
+
+        mock_db_client.start_new_episode = tracking_start_new_episode
+
+        # Fire two messages for the same user concurrently
+        results = await asyncio.gather(
+            episode_manager.process_user_message(user_id=12345, content="First concurrent message"),
+            episode_manager.process_user_message(
+                user_id=12345, content="Second concurrent message"
+            ),
+        )
+
+        # Both calls must succeed and land in the same episode
+        assert results[0].episode.id == results[1].episode.id
+        # Only one episode should have been created (the first message triggers creation;
+        # the second sees an active episode already and reuses it)
+        assert len(start_new_episode_calls) == 1

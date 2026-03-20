@@ -8,8 +8,9 @@ This module provides episode management with:
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from loguru import logger
 
 from bot.services.episode_switcher import (
@@ -76,6 +77,14 @@ class EpisodeManager:
         )
         # Track switch history for rate limiting
         self._switch_history: dict[int, list[datetime]] = {}
+        # Per-user locks to prevent concurrent episode creation
+        self._user_locks: dict[int, asyncio.Lock] = {}
+
+    def _get_user_lock(self, user_id: int) -> asyncio.Lock:
+        """Get or create per-user asyncio lock."""
+        if user_id not in self._user_locks:
+            self._user_locks[user_id] = asyncio.Lock()
+        return self._user_locks[user_id]
 
     def _get_recent_switch_count(self, user_id: int, window_hours: float = 1.0) -> int:
         """Count recent episode switches for anti-flap."""
@@ -84,7 +93,7 @@ class EpisodeManager:
         if user_id not in self._switch_history:
             return 0
 
-        cutoff = datetime.now() - timedelta(hours=window_hours)
+        cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=window_hours)
         recent = [t for t in self._switch_history[user_id] if t > cutoff]
         self._switch_history[user_id] = recent
         return len(recent)
@@ -93,7 +102,7 @@ class EpisodeManager:
         """Record an episode switch for rate limiting."""
         if user_id not in self._switch_history:
             self._switch_history[user_id] = []
-        self._switch_history[user_id].append(datetime.now())
+        self._switch_history[user_id].append(datetime.now(tz=timezone.utc))
 
     async def _seed_in_memory_state_from_db(self, user_id: int) -> bool:
         """Seed in-memory episode manager from database state.
@@ -124,12 +133,14 @@ class EpisodeManager:
         in_memory_episode = InMemoryEpisode(
             episode_id=episode.id,
             user_id=user_id,
-            start_time=episode.started_at or datetime.now(),
-            end_time=episode.last_user_message_at or episode.started_at or datetime.now(),
+            start_time=episode.started_at or datetime.now(tz=timezone.utc),
+            end_time=episode.last_user_message_at
+            or episode.started_at
+            or datetime.now(tz=timezone.utc),
             messages=[
                 Message(
                     content=m.content_text,
-                    timestamp=m.created_at or datetime.now(),
+                    timestamp=m.created_at or datetime.now(tz=timezone.utc),
                     user_id=user_id,
                     role=m.role,
                 )
@@ -175,7 +186,7 @@ class EpisodeManager:
             if episode:
                 # Check minimum episode duration
                 if hasattr(episode, "started_at") and episode.started_at:
-                    elapsed = (datetime.now() - episode.started_at).total_seconds()
+                    elapsed = (datetime.now(tz=timezone.utc) - episode.started_at).total_seconds()
                     if elapsed < self.config.min_episode_duration:
                         return SwitchDecision(
                             should_switch=False,
@@ -186,7 +197,9 @@ class EpisodeManager:
 
                 # Check time gap
                 if hasattr(episode, "last_user_message_at") and episode.last_user_message_at:
-                    gap = (datetime.now() - episode.last_user_message_at).total_seconds()
+                    gap = (
+                        datetime.now(tz=timezone.utc) - episode.last_user_message_at
+                    ).total_seconds()
                     if gap >= self.config.time_gap_threshold:
                         return SwitchDecision(
                             should_switch=True,
@@ -213,54 +226,55 @@ class EpisodeManager:
         Returns:
             MessageResult with message, episode, and switch info
         """
-        if self.db is None:
-            raise RuntimeError("Database client not configured")
+        async with self._get_user_lock(user_id):
+            if self.db is None:
+                raise RuntimeError("Database client not configured")
 
-        # Evaluate episode switch
-        switch_decision = await self._evaluate_switch(user_id, content)
+            # Evaluate episode switch
+            switch_decision = await self._evaluate_switch(user_id, content)
 
-        # Get or create thread
-        thread = await self.db.get_or_create_thread(user_id)
+            # Get or create thread
+            thread = await self.db.get_or_create_thread(user_id)
 
-        # Handle episode switch
-        if switch_decision.should_switch:
-            episode = await self.db.start_new_episode(thread.id)
-            self._record_switch(user_id)
-            is_new_episode = True
-            logger.info(
-                "Started new episode {} for user {} (reason: {})",
-                episode.id,
-                user_id,
-                switch_decision.reason,
-            )
-        else:
-            episode = await self.db.get_active_episode_for_user(user_id)
-            if episode is None:
+            # Handle episode switch
+            if switch_decision.should_switch:
                 episode = await self.db.start_new_episode(thread.id)
+                self._record_switch(user_id)
                 is_new_episode = True
+                logger.info(
+                    "Started new episode {} for user {} (reason: {})",
+                    episode.id,
+                    user_id,
+                    switch_decision.reason,
+                )
             else:
-                is_new_episode = False
+                episode = await self.db.get_active_episode_for_user(user_id)
+                if episode is None:
+                    episode = await self.db.start_new_episode(thread.id)
+                    is_new_episode = True
+                else:
+                    is_new_episode = False
 
-        # Persist message
-        message = await self.db.add_message(
-            telegram_user_id=user_id,
-            role="user",
-            content_text=content,
-        )
+            # Persist message
+            message = await self.db.add_message(
+                telegram_user_id=user_id,
+                role="user",
+                content_text=content,
+            )
 
-        # Track in in-memory manager for topic detection
-        await self._in_memory_manager.add_message(
-            user_id=user_id,
-            content=content,
-            role="user",
-        )
+            # Track in in-memory manager for topic detection
+            await self._in_memory_manager.add_message(
+                user_id=user_id,
+                content=content,
+                role="user",
+            )
 
-        return MessageResult(
-            message=message,
-            episode=episode,
-            is_new_episode=is_new_episode,
-            switch_decision=switch_decision,
-        )
+            return MessageResult(
+                message=message,
+                episode=episode,
+                is_new_episode=is_new_episode,
+                switch_decision=switch_decision,
+            )
 
     async def process_assistant_message(
         self,
@@ -282,38 +296,39 @@ class EpisodeManager:
         Returns:
             MessageResult with message and episode info
         """
-        if self.db is None:
-            raise RuntimeError("Database client not configured")
+        async with self._get_user_lock(user_id):
+            if self.db is None:
+                raise RuntimeError("Database client not configured")
 
-        # Get or create thread and episode
-        thread = await self.db.get_or_create_thread(user_id)
-        episode = await self.db.get_active_episode_for_user(user_id)
-        if episode is None:
-            episode = await self.db.start_new_episode(thread.id)
-            is_new_episode = True
-        else:
-            is_new_episode = False
+            # Get or create thread and episode
+            thread = await self.db.get_or_create_thread(user_id)
+            episode = await self.db.get_active_episode_for_user(user_id)
+            if episode is None:
+                episode = await self.db.start_new_episode(thread.id)
+                is_new_episode = True
+            else:
+                is_new_episode = False
 
-        # Persist message
-        message = await self.db.add_message(
-            telegram_user_id=user_id,
-            role="assistant",
-            content_text=content,
-            tokens_in=tokens_in,
-            tokens_out=tokens_out,
-            model=model,
-        )
+            # Persist message
+            message = await self.db.add_message(
+                telegram_user_id=user_id,
+                role="assistant",
+                content_text=content,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                model=model,
+            )
 
-        return MessageResult(
-            message=message,
-            episode=episode,
-            is_new_episode=is_new_episode,
-            switch_decision=SwitchDecision(
-                should_switch=False,
-                reason="Assistant message",
-                confidence=1.0,
-            ),
-        )
+            return MessageResult(
+                message=message,
+                episode=episode,
+                is_new_episode=is_new_episode,
+                switch_decision=SwitchDecision(
+                    should_switch=False,
+                    reason="Assistant message",
+                    confidence=1.0,
+                ),
+            )
 
     async def close_current_episode(
         self,
@@ -329,21 +344,22 @@ class EpisodeManager:
         Returns:
             Closed Episode or None if no active episode
         """
-        if self.db is None:
-            return None
+        async with self._get_user_lock(user_id):
+            if self.db is None:
+                return None
 
-        episode = await self.db.get_active_episode_for_user(user_id)
-        if episode is None:
-            return None
+            episode = await self.db.get_active_episode_for_user(user_id)
+            if episode is None:
+                return None
 
-        closed = await self.db.close_episode(episode.id)
+            closed = await self.db.close_episode(episode.id)
 
-        if final_summary:
-            # Store summary would go here
-            pass
+            if final_summary:
+                # Store summary would go here
+                pass
 
-        logger.info("Closed episode {} for user {}", episode.id, user_id)
-        return closed
+            logger.info("Closed episode {} for user {}", episode.id, user_id)
+            return closed
 
     async def get_current_episode(self, user_id: int) -> "Episode | None":
         """Get the current episode for a user.

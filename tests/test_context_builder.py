@@ -660,6 +660,31 @@ class TestAssembleForLLM:
         assert non_system[0]["content"] == "First"
         assert non_system[1]["content"] == "Second"
 
+    def test_assemble_for_llm_no_duplicate_messages(self):
+        """Recent messages should appear only as chat messages, not in system context."""
+        builder = ContextBuilder()
+        messages_list = [
+            ConversationMessage(role=MessageRole.USER, content="Hello there"),
+            ConversationMessage(role=MessageRole.ASSISTANT, content="Hi!"),
+        ]
+
+        result = builder.assemble_for_llm(
+            recent_messages=messages_list,
+            system_prompt="Test prompt",
+        )
+
+        # System context should NOT contain the recent messages text
+        system_msgs = [m for m in result if m["role"] == "system"]
+        for sys_msg in system_msgs:
+            assert "Hello there" not in sys_msg["content"]
+            assert "Hi!" not in sys_msg["content"]
+
+        # But recent messages should appear as native chat messages
+        chat_msgs = [m for m in result if m["role"] in ("user", "assistant")]
+        assert len(chat_msgs) == 2
+        assert chat_msgs[0]["content"] == "Hello there"
+        assert chat_msgs[1]["content"] == "Hi!"
+
 
 class TestGlobalInstance:
     """Tests for global ContextBuilder instance management."""

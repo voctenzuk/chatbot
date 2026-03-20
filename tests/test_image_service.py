@@ -1,4 +1,4 @@
-"""Tests for image generation service and handler integration."""
+"""Tests for image generation service and tool-calling handler integration."""
 
 from __future__ import annotations
 
@@ -10,39 +10,26 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
-class TestExtractPhotoPrompt:
-    """Tests for the extract_photo_prompt helper."""
+class TestSendPhotoToolSchema:
+    """Tests for the SEND_PHOTO_TOOL schema."""
 
-    def test_extracts_marker(self) -> None:
-        from bot.services.image_service import extract_photo_prompt
+    def test_tool_schema_structure(self) -> None:
+        from bot.services.image_service import SEND_PHOTO_TOOL
 
-        text = "Вот держи! [SEND_PHOTO: cute anime girl selfie smiling]"
-        cleaned, prompt = extract_photo_prompt(text)
-        assert cleaned == "Вот держи!"
-        assert prompt == "cute anime girl selfie smiling"
+        assert SEND_PHOTO_TOOL["name"] == "send_photo"
+        assert "prompt" in SEND_PHOTO_TOOL["parameters"]["properties"]
+        assert "prompt" in SEND_PHOTO_TOOL["parameters"]["required"]
 
-    def test_no_marker(self) -> None:
-        from bot.services.image_service import extract_photo_prompt
+    def test_send_photo_tool_format(self) -> None:
+        """SEND_PHOTO_TOOL should be in bare dict format for bind_tools()."""
+        from bot.services.image_service import SEND_PHOTO_TOOL
 
-        text = "Просто текстовый ответ"
-        cleaned, prompt = extract_photo_prompt(text)
-        assert cleaned == "Просто текстовый ответ"
-        assert prompt is None
-
-    def test_empty_text(self) -> None:
-        from bot.services.image_service import extract_photo_prompt
-
-        cleaned, prompt = extract_photo_prompt("")
-        assert cleaned == ""
-        assert prompt is None
-
-    def test_marker_only(self) -> None:
-        from bot.services.image_service import extract_photo_prompt
-
-        text = "[SEND_PHOTO: a photo of sunset]"
-        cleaned, prompt = extract_photo_prompt(text)
-        assert cleaned == ""
-        assert prompt == "a photo of sunset"
+        assert "name" in SEND_PHOTO_TOOL
+        assert "parameters" in SEND_PHOTO_TOOL
+        assert SEND_PHOTO_TOOL["name"] == "send_photo"
+        # Should NOT have the wrapped OpenAI format
+        assert "function" not in SEND_PHOTO_TOOL
+        assert SEND_PHOTO_TOOL.get("type") != "function"
 
 
 class TestImageServiceGenerate:
@@ -106,13 +93,13 @@ class TestImageServiceGenerate:
         assert result is None
 
 
-class TestHandlerImageIntegration:
-    """Tests for image handling in chat handler."""
+class TestHandlerToolCallIntegration:
+    """Tests for tool-call-based image handling in chat handler."""
 
     @pytest.mark.asyncio
-    async def test_chat_with_photo_marker_sends_image(self) -> None:
-        """When LLM includes [SEND_PHOTO:], image generated + sent via answer_photo."""
-        from bot.services.llm_service import LLMResponse
+    async def test_chat_with_tool_call_sends_image(self) -> None:
+        """When LLM returns send_photo tool_call, image is generated and sent."""
+        from bot.services.llm_service import LLMResponse, ToolCall
 
         mock_msg = MagicMock()
         mock_msg.from_user = MagicMock(id=123, first_name="Test")
@@ -130,10 +117,11 @@ class TestHandlerImageIntegration:
         mock_msg.caption = None
 
         llm_resp = LLMResponse(
-            content="Вот держи! [SEND_PHOTO: cute selfie photo]",
+            content="Вот держи!",
             model="test",
             tokens_in=10,
             tokens_out=20,
+            tool_calls=[ToolCall(name="send_photo", args={"prompt": "cute selfie"}, id="t1")],
         )
 
         mock_episode_mgr = AsyncMock()
@@ -165,14 +153,13 @@ class TestHandlerImageIntegration:
             await chat(mock_msg)
 
         mock_msg.answer_photo.assert_called_once()
-        # Text should be cleaned (no marker)
-        if mock_msg.answer.called:
-            call_text = mock_msg.answer.call_args[0][0]
-            assert "[SEND_PHOTO" not in call_text
+        mock_image_svc.generate.assert_called_once_with("cute selfie", 123)
+        # Text response also sent before photo
+        mock_msg.answer.assert_called_once_with("Вот держи!")
 
     @pytest.mark.asyncio
-    async def test_chat_without_marker_sends_text_only(self) -> None:
-        """When LLM has no marker, only text is sent."""
+    async def test_chat_without_tool_call_sends_text_only(self) -> None:
+        """When LLM has no tool_calls, only text is sent."""
         from bot.services.llm_service import LLMResponse
 
         mock_msg = MagicMock()
@@ -191,7 +178,11 @@ class TestHandlerImageIntegration:
         mock_msg.caption = None
 
         llm_resp = LLMResponse(
-            content="Привет! Как дела?", model="test", tokens_in=5, tokens_out=10
+            content="Привет! Как дела?",
+            model="test",
+            tokens_in=5,
+            tokens_out=10,
+            tool_calls=[],
         )
 
         mock_episode_mgr = AsyncMock()
@@ -220,3 +211,63 @@ class TestHandlerImageIntegration:
 
         mock_msg.answer.assert_called_once_with("Привет! Как дела?")
         mock_msg.answer_photo.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_chat_image_gen_failure_sends_text(self) -> None:
+        """When image generation fails, text response is still sent."""
+        from bot.services.llm_service import LLMResponse, ToolCall
+
+        mock_msg = MagicMock()
+        mock_msg.from_user = MagicMock(id=123, first_name="Test")
+        mock_msg.text = "фото"
+        mock_msg.answer = AsyncMock()
+        mock_msg.answer_photo = AsyncMock()
+        mock_msg.photo = None
+        mock_msg.document = None
+        mock_msg.voice = None
+        mock_msg.video = None
+        mock_msg.audio = None
+        mock_msg.sticker = None
+        mock_msg.location = None
+        mock_msg.contact = None
+        mock_msg.caption = None
+
+        llm_resp = LLMResponse(
+            content="Вот!",
+            model="test",
+            tokens_in=5,
+            tokens_out=10,
+            tool_calls=[ToolCall(name="send_photo", args={"prompt": "test"}, id="t1")],
+        )
+
+        mock_episode_mgr = AsyncMock()
+        mock_episode_mgr.process_user_message = AsyncMock(
+            return_value=MagicMock(
+                episode=MagicMock(id="ep1"),
+                is_new_episode=False,
+                switch_decision=MagicMock(reason="same topic"),
+            )
+        )
+        mock_episode_mgr.process_assistant_message = AsyncMock()
+        mock_episode_mgr.get_recent_messages = AsyncMock(return_value=[])
+
+        mock_image_svc = MagicMock()
+        mock_image_svc.generate = AsyncMock(return_value=None)  # generation failed
+
+        with (
+            patch("bot.handlers.get_episode_manager_service", return_value=mock_episode_mgr),
+            patch("bot.handlers.get_llm_service") as mock_llm,
+            patch("bot.handlers.get_image_service", return_value=mock_image_svc),
+            patch("bot.handlers.IMAGE_SERVICE_AVAILABLE", True),
+            patch("bot.handlers.MEMORY_SERVICE_AVAILABLE", False),
+            patch("bot.handlers.DB_CLIENT_AVAILABLE", False),
+        ):
+            mock_llm.return_value.generate = AsyncMock(return_value=llm_resp)
+
+            from bot.handlers import chat
+
+            await chat(mock_msg)
+
+        # Photo not sent, but text fallback is
+        mock_msg.answer_photo.assert_not_called()
+        mock_msg.answer.assert_called_once_with("Вот!")

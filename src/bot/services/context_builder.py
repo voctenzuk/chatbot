@@ -552,10 +552,8 @@ class ContextBuilder:
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
 
-        # Assemble context as a system message
-        context = self.assemble(
-            summary, recent_messages, semantic_memories, artifact_surrogates, query
-        )
+        # Assemble context (summary + semantic memories + artifacts, NOT recent messages)
+        context = self.assemble(summary, None, semantic_memories, artifact_surrogates, query)
         if context:
             context_header = "Relevant context for this conversation:\n\n"
             messages.append(
@@ -565,7 +563,7 @@ class ContextBuilder:
                 }
             )
 
-        # Add recent messages as conversation history
+        # Add recent messages as native chat messages (proper role separation)
         if recent_messages:
             for msg in recent_messages[-self.config.max_recent_messages :]:
                 messages.append(msg.to_dict())
