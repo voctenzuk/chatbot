@@ -171,10 +171,9 @@ class TestHandlerToolCallIntegration:
             await chat(mock_msg)
 
         mock_msg.answer_photo.assert_called_once()
-        # generate() is called twice: once in the tool execution loop (LLM feedback),
-        # once in handle_message step 4 (actual image delivery)
-        assert mock_image_svc.generate.call_count == 2
-        mock_image_svc.generate.assert_any_call("cute selfie", 123)
+        # generate() called once in tool loop; image cached and reused for delivery
+        assert mock_image_svc.generate.call_count == 1
+        mock_image_svc.generate.assert_called_once_with("cute selfie", 123)
 
     @pytest.mark.asyncio
     async def test_chat_without_tool_call_sends_text_only(self) -> None:

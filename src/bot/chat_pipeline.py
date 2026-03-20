@@ -82,6 +82,7 @@ class ChatPipeline:
     def __init__(self, episode_manager: EpisodeManager) -> None:
         self._episode_manager = episode_manager
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._generated_images: dict[str, bytes] = {}  # cache from tool loop
 
     def _fire_and_forget(self, coro: Any) -> None:
         """Schedule a coroutine as a background task with reference tracking."""
@@ -144,21 +145,13 @@ class ChatPipeline:
             response = _LLM_FALLBACK
             llm_response = None
 
-        # 4. Handle tool calls (image generation)
+        # 4. Retrieve cached image from tool loop (already generated in _execute_tool_for_loop)
         image_bytes: bytes | None = None
-        if (
-            IMAGE_SERVICE_AVAILABLE
-            and get_image_service is not None
-            and llm_response is not None
-            and llm_response.tool_calls
-        ):
+        if llm_response is not None and llm_response.tool_calls:
             for tool_call in llm_response.tool_calls:
-                if tool_call.name == "send_photo":
-                    try:
-                        prompt = tool_call.args.get("prompt", "")
-                        image_bytes = await get_image_service().generate(prompt, user_id)
-                    except Exception as img_exc:
-                        logger.warning("Image generation failed for user {}: {}", user_id, img_exc)
+                if tool_call.name == "send_photo" and tool_call.id in self._generated_images:
+                    image_bytes = self._generated_images.pop(tool_call.id)
+                    break
 
         # 5. Persist assistant response + track usage
         if llm_response is not None:
@@ -290,13 +283,18 @@ class ChatPipeline:
         return llm_response
 
     async def _execute_tool_for_loop(self, tool_call: ToolCall, user_id: int) -> str:
-        """Execute a tool call and return a result string for the LLM."""
+        """Execute a tool call and return a result string for the LLM.
+
+        Generated images are cached in self._generated_images so handle_message
+        can deliver them without re-generating (avoids double API cost).
+        """
         if tool_call.name == "send_photo":
             try:
                 if IMAGE_SERVICE_AVAILABLE and get_image_service is not None:
                     prompt = tool_call.args.get("prompt", "")
                     image_bytes = await get_image_service().generate(prompt, user_id)
                     if image_bytes is not None:
+                        self._generated_images[tool_call.id] = image_bytes
                         return f"Photo generated successfully for prompt: {prompt[:50]}"
                 return "Image service unavailable"
             except Exception as e:
