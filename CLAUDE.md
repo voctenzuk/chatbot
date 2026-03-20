@@ -37,16 +37,18 @@ CI gate (all must pass before merge): `ruff format --check .`, `ruff check .`, `
 
 **Graceful degradation:** Cognee memory, Supabase DB, and Redis are all optional — the bot falls back to in-memory-only operation when any is missing. Handlers catch service-level exceptions and reply with Russian fallback text.
 
-**Key services** (all in `src/bot/services/`):
-| Service | Role |
-|---|---|
-| `llm_service.py` | LangChain ChatOpenAI wrapper, token tracking |
-| `cognee_memory_service.py` | Long-term memory via Cognee knowledge graph + vector search |
-| `context_builder.py` | Dual-memory (short-term + semantic) prompt assembly |
-| `episode_manager.py` | Episode lifecycle, DB persistence, delegates to `episode_switcher` |
-| `db_client.py` | Supabase client for threads/episodes/messages |
-| `system_prompt.py` | Bot persona system prompt with user-name personalization |
-| `memory_models.py` | Memory category/type enums + `MemoryUnit` data models |
+**Key services** (domain packages in `src/bot/`):
+| Service | Package | Role |
+|---|---|---|
+| `wiring.py` | `bot` | Composition root: `AppContext` + `build_app_context()` |
+| `chat_pipeline.py` | `bot` | Framework-agnostic chat orchestration, zero aiogram imports |
+| `service.py` | `bot.llm` | LangChain ChatOpenAI wrapper, token tracking |
+| `cognee_service.py` | `bot.memory` | Long-term memory via Cognee knowledge graph + vector search |
+| `context_builder.py` | `bot.conversation` | Dual-memory (short-term + semantic) prompt assembly |
+| `episode_manager.py` | `bot.conversation` | Episode lifecycle, DB persistence, delegates to `episode_switcher` |
+| `db_client.py` | `bot.infra` | Supabase client for threads/episodes/messages |
+| `system_prompt.py` | `bot.conversation` | Bot persona system prompt with user-name personalization |
+| `models.py` | `bot.memory` | Memory category/type enums + `MemoryFact` data models |
 
 ## Critical Rules
 
