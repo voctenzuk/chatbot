@@ -6,8 +6,12 @@ import base64
 from datetime import datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
+
+from bot.chat_pipeline import ChatPipeline
+from bot.services.llm_service import LLMResponse, ToolCall
 
 
 class TestSendPhotoToolSchema:
@@ -93,14 +97,44 @@ class TestImageServiceGenerate:
         assert result is None
 
 
+def _make_message_result(episode_id: str | None = None) -> MagicMock:
+    """Build a mock MessageResult for episode_manager."""
+    mock_episode = MagicMock()
+    mock_episode.id = episode_id or str(uuid4())
+
+    mock_msg = MagicMock()
+    mock_msg.id = str(uuid4())
+    mock_msg.episode_id = mock_episode.id
+
+    mock_decision = MagicMock()
+    mock_decision.should_switch = False
+    mock_decision.reason = "same topic"
+    mock_decision.confidence = 0.5
+    mock_decision.trigger_type = None
+
+    result = MagicMock()
+    result.message = mock_msg
+    result.episode = mock_episode
+    result.is_new_episode = False
+    result.switch_decision = mock_decision
+    return result
+
+
 class TestHandlerToolCallIntegration:
     """Tests for tool-call-based image handling in chat handler."""
 
-    @pytest.mark.asyncio
-    async def test_chat_with_tool_call_sends_image(self) -> None:
-        """When LLM returns send_photo tool_call, image is generated and sent."""
-        from bot.services.llm_service import LLMResponse, ToolCall
+    @pytest.fixture
+    def mock_episode_manager(self) -> AsyncMock:
+        mgr = AsyncMock()
+        mgr.process_user_message = AsyncMock(return_value=_make_message_result())
+        mgr.process_assistant_message = AsyncMock(return_value=_make_message_result())
+        mgr.get_recent_messages = AsyncMock(return_value=[])
+        mgr.get_current_episode = AsyncMock(return_value=None)
+        return mgr
 
+    @pytest.mark.asyncio
+    async def test_chat_with_tool_call_sends_image(self, mock_episode_manager: AsyncMock) -> None:
+        """When LLM returns send_photo tool_call, image is generated and sent."""
         mock_msg = MagicMock()
         mock_msg.from_user = MagicMock(id=123, first_name="Test")
         mock_msg.text = "пришли фото"
@@ -124,51 +158,41 @@ class TestHandlerToolCallIntegration:
             tool_calls=[ToolCall(name="send_photo", args={"prompt": "cute selfie"}, id="t1")],
         )
 
-        mock_episode_mgr = AsyncMock()
-        mock_episode_mgr.process_user_message = AsyncMock(
-            return_value=MagicMock(
-                episode=MagicMock(id="ep1"),
-                is_new_episode=False,
-                switch_decision=MagicMock(reason="same topic"),
-            )
-        )
-        mock_episode_mgr.process_assistant_message = AsyncMock()
-        mock_episode_mgr.get_recent_messages = AsyncMock(return_value=[])
-
         mock_image_svc = MagicMock()
         mock_image_svc.generate = AsyncMock(return_value=b"fake_image_bytes")
 
         mock_llm_svc = AsyncMock()
         mock_llm_svc.generate = AsyncMock(return_value=llm_resp)
 
+        mock_context_builder = MagicMock()
+        mock_context_builder.assemble_for_llm = MagicMock(
+            return_value=[
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "пришли фото"},
+            ]
+        )
+
+        mock_langfuse = MagicMock()
+        mock_langfuse.create_config = MagicMock(return_value={})
+
         with (
-            patch("bot.handlers.get_episode_manager_service", return_value=mock_episode_mgr),
-            patch("bot.chat_pipeline.get_llm_service", return_value=mock_llm_svc),
-            patch("bot.chat_pipeline.get_image_service", return_value=mock_image_svc),
-            patch("bot.chat_pipeline.IMAGE_SERVICE_AVAILABLE", True),
-            patch("bot.chat_pipeline.MEMORY_SERVICE_AVAILABLE", False),
-            patch("bot.chat_pipeline.DB_CLIENT_AVAILABLE", False),
-            patch("bot.handlers.DB_CLIENT_AVAILABLE", False),
-            patch(
-                "bot.chat_pipeline.get_langfuse_service",
-                return_value=MagicMock(create_config=MagicMock(return_value={})),
-            ),
-            patch(
-                "bot.chat_pipeline.get_context_builder",
-                return_value=MagicMock(
-                    assemble_for_llm=MagicMock(
-                        return_value=[
-                            {"role": "system", "content": "sys"},
-                            {"role": "user", "content": "пришли фото"},
-                        ]
-                    )
-                ),
-            ),
             patch("bot.chat_pipeline.get_system_prompt", return_value="sys"),
+            patch(
+                "bot.media.image_service.SEND_PHOTO_TOOL",
+                {"name": "send_photo"},
+            ),
         ):
+            pipeline = ChatPipeline(
+                llm=mock_llm_svc,
+                episode_manager=mock_episode_manager,
+                context_builder=mock_context_builder,
+                langfuse=mock_langfuse,
+                image_service=mock_image_svc,
+            )
+
             from bot.handlers import chat
 
-            await chat(mock_msg)
+            await chat(mock_msg, pipeline=pipeline)
 
         mock_msg.answer_photo.assert_called_once()
         # generate() called once in tool loop; image cached and reused for delivery
@@ -176,10 +200,10 @@ class TestHandlerToolCallIntegration:
         mock_image_svc.generate.assert_called_once_with("cute selfie", 123)
 
     @pytest.mark.asyncio
-    async def test_chat_without_tool_call_sends_text_only(self) -> None:
+    async def test_chat_without_tool_call_sends_text_only(
+        self, mock_episode_manager: AsyncMock
+    ) -> None:
         """When LLM has no tool_calls, only text is sent."""
-        from bot.services.llm_service import LLMResponse
-
         mock_msg = MagicMock()
         mock_msg.from_user = MagicMock(id=123, first_name="Test")
         mock_msg.text = "привет"
@@ -203,56 +227,38 @@ class TestHandlerToolCallIntegration:
             tool_calls=[],
         )
 
-        mock_episode_mgr = AsyncMock()
-        mock_episode_mgr.process_user_message = AsyncMock(
-            return_value=MagicMock(
-                episode=MagicMock(id="ep1"),
-                is_new_episode=False,
-                switch_decision=MagicMock(reason="same topic"),
-            )
-        )
-        mock_episode_mgr.process_assistant_message = AsyncMock()
-        mock_episode_mgr.get_recent_messages = AsyncMock(return_value=[])
-
         mock_llm_svc = AsyncMock()
         mock_llm_svc.generate = AsyncMock(return_value=llm_resp)
 
-        with (
-            patch("bot.handlers.get_episode_manager_service", return_value=mock_episode_mgr),
-            patch("bot.chat_pipeline.get_llm_service", return_value=mock_llm_svc),
-            patch("bot.chat_pipeline.IMAGE_SERVICE_AVAILABLE", True),
-            patch("bot.chat_pipeline.MEMORY_SERVICE_AVAILABLE", False),
-            patch("bot.chat_pipeline.DB_CLIENT_AVAILABLE", False),
-            patch("bot.handlers.DB_CLIENT_AVAILABLE", False),
-            patch(
-                "bot.chat_pipeline.get_langfuse_service",
-                return_value=MagicMock(create_config=MagicMock(return_value={})),
-            ),
-            patch(
-                "bot.chat_pipeline.get_context_builder",
-                return_value=MagicMock(
-                    assemble_for_llm=MagicMock(
-                        return_value=[
-                            {"role": "system", "content": "sys"},
-                            {"role": "user", "content": "привет"},
-                        ]
-                    )
-                ),
-            ),
-            patch("bot.chat_pipeline.get_system_prompt", return_value="sys"),
-        ):
+        mock_context_builder = MagicMock()
+        mock_context_builder.assemble_for_llm = MagicMock(
+            return_value=[
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "привет"},
+            ]
+        )
+
+        mock_langfuse = MagicMock()
+        mock_langfuse.create_config = MagicMock(return_value={})
+
+        with patch("bot.chat_pipeline.get_system_prompt", return_value="sys"):
+            pipeline = ChatPipeline(
+                llm=mock_llm_svc,
+                episode_manager=mock_episode_manager,
+                context_builder=mock_context_builder,
+                langfuse=mock_langfuse,
+            )
+
             from bot.handlers import chat
 
-            await chat(mock_msg)
+            await chat(mock_msg, pipeline=pipeline)
 
         mock_msg.answer.assert_called_once_with("Привет! Как дела?")
         mock_msg.answer_photo.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_chat_image_gen_failure_sends_text(self) -> None:
+    async def test_chat_image_gen_failure_sends_text(self, mock_episode_manager: AsyncMock) -> None:
         """When image generation fails, text response is still sent."""
-        from bot.services.llm_service import LLMResponse, ToolCall
-
         mock_msg = MagicMock()
         mock_msg.from_user = MagicMock(id=123, first_name="Test")
         mock_msg.text = "фото"
@@ -276,51 +282,41 @@ class TestHandlerToolCallIntegration:
             tool_calls=[ToolCall(name="send_photo", args={"prompt": "test"}, id="t1")],
         )
 
-        mock_episode_mgr = AsyncMock()
-        mock_episode_mgr.process_user_message = AsyncMock(
-            return_value=MagicMock(
-                episode=MagicMock(id="ep1"),
-                is_new_episode=False,
-                switch_decision=MagicMock(reason="same topic"),
-            )
-        )
-        mock_episode_mgr.process_assistant_message = AsyncMock()
-        mock_episode_mgr.get_recent_messages = AsyncMock(return_value=[])
-
         mock_image_svc = MagicMock()
         mock_image_svc.generate = AsyncMock(return_value=None)  # generation failed
 
         mock_llm_svc = AsyncMock()
         mock_llm_svc.generate = AsyncMock(return_value=llm_resp)
 
+        mock_context_builder = MagicMock()
+        mock_context_builder.assemble_for_llm = MagicMock(
+            return_value=[
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "фото"},
+            ]
+        )
+
+        mock_langfuse = MagicMock()
+        mock_langfuse.create_config = MagicMock(return_value={})
+
         with (
-            patch("bot.handlers.get_episode_manager_service", return_value=mock_episode_mgr),
-            patch("bot.chat_pipeline.get_llm_service", return_value=mock_llm_svc),
-            patch("bot.chat_pipeline.get_image_service", return_value=mock_image_svc),
-            patch("bot.chat_pipeline.IMAGE_SERVICE_AVAILABLE", True),
-            patch("bot.chat_pipeline.MEMORY_SERVICE_AVAILABLE", False),
-            patch("bot.chat_pipeline.DB_CLIENT_AVAILABLE", False),
-            patch("bot.handlers.DB_CLIENT_AVAILABLE", False),
-            patch(
-                "bot.chat_pipeline.get_langfuse_service",
-                return_value=MagicMock(create_config=MagicMock(return_value={})),
-            ),
-            patch(
-                "bot.chat_pipeline.get_context_builder",
-                return_value=MagicMock(
-                    assemble_for_llm=MagicMock(
-                        return_value=[
-                            {"role": "system", "content": "sys"},
-                            {"role": "user", "content": "фото"},
-                        ]
-                    )
-                ),
-            ),
             patch("bot.chat_pipeline.get_system_prompt", return_value="sys"),
+            patch(
+                "bot.media.image_service.SEND_PHOTO_TOOL",
+                {"name": "send_photo"},
+            ),
         ):
+            pipeline = ChatPipeline(
+                llm=mock_llm_svc,
+                episode_manager=mock_episode_manager,
+                context_builder=mock_context_builder,
+                langfuse=mock_langfuse,
+                image_service=mock_image_svc,
+            )
+
             from bot.handlers import chat
 
-            await chat(mock_msg)
+            await chat(mock_msg, pipeline=pipeline)
 
         # Photo not sent, but text fallback is
         mock_msg.answer_photo.assert_not_called()

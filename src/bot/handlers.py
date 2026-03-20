@@ -2,83 +2,31 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import BufferedInputFile, LabeledPrice, Message, PreCheckoutQuery
 from loguru import logger
 
-from bot.chat_pipeline import ChatPipeline
-from bot.conversation.episode_manager import (
-    EpisodeManager,
-    get_episode_manager,
-    set_episode_manager,
-)
-
-try:
-    from bot.infra.db_client import get_db_client
-
-    DB_CLIENT_AVAILABLE = True
-except ImportError:
-    get_db_client = None  # type: ignore[assignment]
-    DB_CLIENT_AVAILABLE = False
+from bot.chat_pipeline import ChatPipeline, _LLM_FALLBACK
 
 router = Router()
 
-_LLM_FALLBACK = "Прости, у меня сейчас не получается ответить. Попробуй ещё раз чуть позже."
-
-
-class EpisodeManagerUnavailableError(Exception):
-    """Raised when episode manager cannot be initialized."""
-
-    def __init__(
-        self, message: str = "Message persistence unavailable", cause: Exception | None = None
-    ) -> None:
-        super().__init__(message)
-        self.cause = cause
-
-
-async def get_episode_manager_service() -> EpisodeManager:
-    """Get or initialize episode manager service."""
-    manager = get_episode_manager()
-
-    manager_db = getattr(manager, "db", None) if manager is not None else None
-    if manager is not None and manager_db is None and DB_CLIENT_AVAILABLE:
-        try:
-            if get_db_client is not None:
-                db_client = get_db_client()
-                manager = EpisodeManager(db_client=db_client)
-                set_episode_manager(manager)
-        except Exception as e:
-            logger.error(
-                "Failed to initialize database client for episode manager: {}. "
-                "Message persistence will be unavailable.",
-                e,
-            )
-            raise EpisodeManagerUnavailableError(
-                "Database initialization failed - messages cannot be persisted",
-                cause=e,
-            ) from e
-
-    if manager is None:
-        manager = EpisodeManager()
-        set_episode_manager(manager)
-    return manager
-
 
 @router.message(CommandStart())
-async def start(message: Message) -> None:
+async def start(message: Message, pipeline: ChatPipeline) -> None:
     """Handle /start command."""
     user_id = message.from_user.id if message.from_user else 0
     user_name = getattr(message.from_user, "first_name", None) if message.from_user else None
 
     try:
-        episode_manager = await get_episode_manager_service()
-        await episode_manager.process_user_message(user_id=user_id, content="/start")
+        await pipeline._episode_manager.process_user_message(user_id=user_id, content="/start")
 
-        # Provision user in DB with Free plan
-        if DB_CLIENT_AVAILABLE and get_db_client is not None:
+        # Provision user in DB
+        db = pipeline._db_client
+        if db is not None:
             try:
-                db = get_db_client()
                 username = (
                     getattr(message.from_user, "username", None) if message.from_user else None
                 )
@@ -87,11 +35,11 @@ async def start(message: Message) -> None:
                 logger.warning("Failed to provision user {}: {}", user_id, e)
 
         response = "Привет. Я рядом 🙂\nРасскажи, как тебя зовут?"
-        await episode_manager.process_assistant_message(user_id=user_id, content=response)
+        await pipeline._episode_manager.process_assistant_message(user_id=user_id, content=response)
         await message.answer(response)
 
-    except EpisodeManagerUnavailableError as e:
-        logger.error("Episode manager unavailable for user {}: {}", user_id, e)
+    except RuntimeError as e:
+        logger.error("Episode manager runtime error in start for user {}: {}", user_id, e)
         await message.answer(
             "Привет. Я рядом 🙂\nРасскажи, как тебя зовут?\n\n"
             "⚠️ Примечание: в данный момент сообщения не сохраняются в базе данных."
@@ -129,7 +77,7 @@ async def pre_checkout(query: PreCheckoutQuery) -> None:
 
 
 @router.message(F.successful_payment)
-async def successful_payment(message: Message) -> None:
+async def successful_payment(message: Message, db_client: Any | None = None) -> None:
     """Handle successful Telegram Stars payment."""
     user_id = message.from_user.id if message.from_user else 0
     try:
@@ -140,16 +88,20 @@ async def successful_payment(message: Message) -> None:
         payload = payment.invoice_payload or ""
         plan_slug = payload.replace("plan:", "") if payload.startswith("plan:") else None
 
-        if plan_slug and DB_CLIENT_AVAILABLE and get_db_client is not None:
+        if plan_slug and db_client is not None:
             try:
-                db = get_db_client()
-                await db.activate_subscription(user_id, plan_slug)
+                await db_client.activate_subscription(user_id, plan_slug)
                 await message.answer("Подписка активирована! Спасибо 💕")
             except Exception as e:
                 logger.error("Failed to activate subscription for user {}: {}", user_id, e)
                 await message.answer(
                     "Оплата получена, но произошла ошибка. Напиши /start и попробуй снова."
                 )
+        elif plan_slug and db_client is None:
+            logger.error("Payment received but DB unavailable for user {}", user_id)
+            await message.answer(
+                "Оплата получена, но произошла ошибка активации. Напиши /start и попробуй снова."
+            )
         else:
             await message.answer("Оплата получена! Спасибо 💕")
     except Exception as e:
@@ -160,7 +112,7 @@ async def successful_payment(message: Message) -> None:
 
 
 @router.message()
-async def chat(message: Message) -> None:
+async def chat(message: Message, pipeline: ChatPipeline) -> None:
     """Handle regular chat messages — delegates to ChatPipeline."""
     user_id = message.from_user.id if message.from_user else 0
     user_name = getattr(message.from_user, "first_name", None) if message.from_user else None
@@ -170,8 +122,6 @@ async def chat(message: Message) -> None:
         content = _extract_message_content(message)
 
     try:
-        episode_manager = await get_episode_manager_service()
-        pipeline = ChatPipeline(episode_manager=episode_manager)
         result = await pipeline.handle_message(
             user_id=user_id, content=content, user_name=user_name
         )
@@ -186,12 +136,6 @@ async def chat(message: Message) -> None:
         elif result.response_text and result.response_text.strip():
             await message.answer(result.response_text)
 
-    except EpisodeManagerUnavailableError as e:
-        logger.error("Episode manager unavailable for user {}: {}", user_id, e)
-        await message.answer(
-            "Я тебя услышала, но сейчас не могу сохранить сообщение.\n\n"
-            "⚠️ Примечание: в данный момент сообщения не сохраняются в базе данных."
-        )
     except RuntimeError as e:
         logger.error("Episode manager runtime error for user {}: {}", user_id, e)
         await message.answer(_LLM_FALLBACK)

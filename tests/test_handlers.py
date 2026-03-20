@@ -4,18 +4,19 @@ Tests cover:
 - Message handling with episode persistence
 - Episode switching integration in handlers
 - Non-text message handling
+- Graceful degradation when DB is unavailable
 """
 
 from __future__ import annotations
 
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 from aiogram.types import Chat, Message, User
 
-# Import handlers module
+from bot.chat_pipeline import ChatPipeline, ChatResult
 from bot.handlers import _extract_message_content, chat, start
 
 
@@ -58,265 +59,269 @@ class MockMessage:
         self.sticker = None
         self.location = None
         self.contact = None
+        self._last_answer: str | None = None
 
-    async def answer(self, text: str, **kwargs):
+    async def answer(self, text: str, **kwargs: Any) -> MagicMock:
         """Mock answer method."""
         self._last_answer = text
         return MagicMock()
 
 
-@pytest.fixture
-def mock_episode_manager():
-    """Create a mock episode manager."""
-    manager = AsyncMock()
-
-    # Mock Episode
+def _make_message_result() -> MagicMock:
+    """Build a mock MessageResult."""
     mock_episode = MagicMock()
     mock_episode.id = str(uuid4())
 
-    # Mock EpisodeMessage
-    mock_message = MagicMock()
-    mock_message.id = str(uuid4())
-    mock_message.episode_id = mock_episode.id
+    mock_msg = MagicMock()
+    mock_msg.id = str(uuid4())
+    mock_msg.episode_id = mock_episode.id
 
-    # Mock SwitchDecision
     mock_decision = MagicMock()
     mock_decision.should_switch = False
     mock_decision.reason = "Continuing current episode"
     mock_decision.confidence = 0.5
     mock_decision.trigger_type = None
 
-    # Create MessageResult-like return
-    mock_result = MagicMock()
-    mock_result.message = mock_message
-    mock_result.episode = mock_episode
-    mock_result.is_new_episode = False
-    mock_result.switch_decision = mock_decision
-
-    manager.process_user_message = AsyncMock(return_value=mock_result)
-    manager.process_assistant_message = AsyncMock(return_value=mock_result)
-
-    return manager
+    result = MagicMock()
+    result.message = mock_msg
+    result.episode = mock_episode
+    result.is_new_episode = False
+    result.switch_decision = mock_decision
+    return result
 
 
 @pytest.fixture
-def mock_get_episode_manager(mock_episode_manager):
-    """Mock get_episode_manager_service function and pipeline dependencies."""
-    mock_langfuse_service = MagicMock()
-    mock_langfuse_service.create_config = MagicMock(return_value={})
+def mock_pipeline() -> MagicMock:
+    """Create a mock ChatPipeline with necessary dependencies."""
+    pipeline = MagicMock(spec=ChatPipeline)
 
-    mock_context_builder = MagicMock()
-    mock_context_builder.assemble_for_llm = MagicMock(
-        return_value=[
-            {"role": "system", "content": "system prompt"},
-            {"role": "user", "content": "hello"},
-        ]
+    # Mock episode manager accessed through pipeline
+    episode_manager = AsyncMock()
+    episode_manager.process_user_message = AsyncMock(return_value=_make_message_result())
+    episode_manager.process_assistant_message = AsyncMock(return_value=_make_message_result())
+    pipeline._episode_manager = episode_manager
+    pipeline._db_client = None
+
+    # Mock handle_message for chat handler
+    pipeline.handle_message = AsyncMock(
+        return_value=ChatResult(response_text="test reply", image_bytes=None)
     )
 
-    mock_llm_service = AsyncMock()
-    from bot.services.llm_service import LLMResponse
-
-    mock_llm_service.generate = AsyncMock(
-        return_value=LLMResponse(
-            content="test reply",
-            model="test-model",
-            tokens_in=10,
-            tokens_out=5,
-        )
-    )
-
-    mock_episode_manager.get_current_episode = AsyncMock(return_value=None)
-    mock_episode_manager.get_recent_messages = AsyncMock(return_value=[])
-
-    with (
-        patch(
-            "bot.handlers.get_episode_manager_service",
-            new=AsyncMock(return_value=mock_episode_manager),
-        ),
-        patch("bot.handlers.DB_CLIENT_AVAILABLE", False),
-        patch("bot.chat_pipeline.DB_CLIENT_AVAILABLE", False),
-        patch("bot.chat_pipeline.MEMORY_SERVICE_AVAILABLE", False),
-        patch(
-            "bot.chat_pipeline.get_langfuse_service",
-            return_value=mock_langfuse_service,
-        ),
-        patch(
-            "bot.chat_pipeline.get_llm_service",
-            return_value=mock_llm_service,
-        ),
-        patch(
-            "bot.chat_pipeline.get_context_builder",
-            return_value=mock_context_builder,
-        ),
-        patch(
-            "bot.chat_pipeline.get_system_prompt",
-            return_value="You are a helpful assistant.",
-        ),
-    ):
-        yield mock_episode_manager
+    return pipeline
 
 
 class TestStartHandler:
     """Tests for start command handler."""
 
     @pytest.mark.asyncio
-    async def test_start_creates_episode(self, mock_get_episode_manager):
+    async def test_start_creates_episode(self, mock_pipeline: MagicMock) -> None:
         """Test that /start creates a new episode."""
         message = MockMessage(text="/start", user_id=12345)
 
-        await start(message)
+        await start(message, pipeline=mock_pipeline)  # type: ignore[arg-type]
 
         # Should persist user message and assistant response
-        assert mock_get_episode_manager.process_user_message.call_count == 1
-        assert mock_get_episode_manager.process_assistant_message.call_count == 1
+        assert mock_pipeline._episode_manager.process_user_message.call_count == 1
+        assert mock_pipeline._episode_manager.process_assistant_message.call_count == 1
 
         # Check user message
-        first_call = mock_get_episode_manager.process_user_message.call_args
+        first_call = mock_pipeline._episode_manager.process_user_message.call_args
         assert first_call.kwargs["user_id"] == 12345
         assert first_call.kwargs["content"] == "/start"
 
     @pytest.mark.asyncio
-    async def test_start_without_user(self, mock_get_episode_manager):
+    async def test_start_without_user(self, mock_pipeline: MagicMock) -> None:
         """Test start handler without from_user."""
         message = MockMessage(text="/start")
         message.from_user = None
 
-        await start(message)
+        await start(message, pipeline=mock_pipeline)  # type: ignore[arg-type]
 
         # Should still work with user_id=0
-        first_call = mock_get_episode_manager.process_user_message.call_args
+        first_call = mock_pipeline._episode_manager.process_user_message.call_args
         assert first_call.kwargs["user_id"] == 0
+
+    @pytest.mark.asyncio
+    async def test_start_provisions_user_when_db_available(self, mock_pipeline: MagicMock) -> None:
+        """Test that /start provisions user in DB when available."""
+        mock_db = AsyncMock()
+        mock_pipeline._db_client = mock_db
+
+        message = MockMessage(text="/start", user_id=12345)
+        await start(message, pipeline=mock_pipeline)  # type: ignore[arg-type]
+
+        mock_db.provision_user.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_start_handles_db_unavailable(self, mock_pipeline: MagicMock) -> None:
+        """Test that start handler informs user when DB is unavailable."""
+        mock_pipeline._episode_manager.process_user_message = AsyncMock(
+            side_effect=RuntimeError("Database client not configured")
+        )
+
+        message = MockMessage(text="/start", user_id=12345)
+        await start(message, pipeline=mock_pipeline)  # type: ignore[arg-type]
+
+        assert message._last_answer is not None
+        assert "рядом" in message._last_answer
+        assert "не сохраняются" in message._last_answer
 
 
 class TestChatHandler:
     """Tests for chat message handler."""
 
     @pytest.mark.asyncio
-    async def test_chat_persists_message(self, mock_get_episode_manager):
-        """Test that chat messages are persisted."""
+    async def test_chat_delegates_to_pipeline(self, mock_pipeline: MagicMock) -> None:
+        """Test that chat messages are delegated to the pipeline."""
         message = MockMessage(text="Hello bot!", user_id=12345)
 
-        await chat(message)
+        await chat(message, pipeline=mock_pipeline)  # type: ignore[arg-type]
 
-        # Should persist user message
-        mock_get_episode_manager.process_user_message.assert_called_once()
-        call_args = mock_get_episode_manager.process_user_message.call_args
-        assert call_args.kwargs["user_id"] == 12345
-        assert call_args.kwargs["content"] == "Hello bot!"
-
-        # Should persist assistant response
-        mock_get_episode_manager.process_assistant_message.assert_called_once()
+        mock_pipeline.handle_message.assert_called_once_with(
+            user_id=12345,
+            content="Hello bot!",
+            user_name=mock_pipeline.handle_message.call_args.kwargs["user_name"],
+        )
 
     @pytest.mark.asyncio
-    async def test_chat_with_episode_switch(self, mock_get_episode_manager):
-        """Test chat handler with episode switching."""
-        # Create a mock result with is_new_episode=True
-        mock_result = MagicMock()
-        mock_result.message.episode_id = str(uuid4())
-        mock_result.episode.id = str(uuid4())
-        mock_result.is_new_episode = True
-        mock_result.switch_decision.should_switch = True
-        mock_result.switch_decision.reason = "Time gap detected"
-        mock_result.switch_decision.trigger_type = "time_gap"
+    async def test_chat_returns_response(self, mock_pipeline: MagicMock) -> None:
+        """Test that chat handler returns the pipeline response."""
+        mock_pipeline.handle_message = AsyncMock(
+            return_value=ChatResult(response_text="LLM reply text")
+        )
+        message = MockMessage(text="Hello!", user_id=12345)
 
-        mock_get_episode_manager.process_user_message = AsyncMock(return_value=mock_result)
+        await chat(message, pipeline=mock_pipeline)  # type: ignore[arg-type]
+
+        assert message._last_answer == "LLM reply text"
+
+    @pytest.mark.asyncio
+    async def test_chat_with_episode_switch(self, mock_pipeline: MagicMock) -> None:
+        """Test chat handler with episode switching."""
+        mock_pipeline.handle_message = AsyncMock(
+            return_value=ChatResult(response_text="reply after switch")
+        )
 
         message = MockMessage(text="New topic", user_id=12345)
-        await chat(message)
+        await chat(message, pipeline=mock_pipeline)  # type: ignore[arg-type]
 
-        # Should still work with episode switch
-        assert mock_get_episode_manager.process_user_message.called
+        assert mock_pipeline.handle_message.called
+        assert message._last_answer == "reply after switch"
+
+    @pytest.mark.asyncio
+    async def test_chat_runtime_error_returns_fallback(self, mock_pipeline: MagicMock) -> None:
+        """Test that RuntimeError returns LLM fallback message."""
+        mock_pipeline.handle_message = AsyncMock(
+            side_effect=RuntimeError("Database client not configured")
+        )
+
+        message = MockMessage(text="Hello", user_id=12345)
+        await chat(message, pipeline=mock_pipeline)  # type: ignore[arg-type]
+
+        assert message._last_answer is not None
+        assert "Прости" in message._last_answer or "не получается" in message._last_answer
+
+    @pytest.mark.asyncio
+    async def test_chat_unexpected_error_returns_generic_fallback(
+        self, mock_pipeline: MagicMock
+    ) -> None:
+        """Test that unexpected errors return generic fallback."""
+        mock_pipeline.handle_message = AsyncMock(side_effect=Exception("Unexpected error"))
+
+        message = MockMessage(text="Hello", user_id=12345)
+        await chat(message, pipeline=mock_pipeline)  # type: ignore[arg-type]
+
+        assert message._last_answer is not None
+        assert "услышала" in message._last_answer
 
 
 class TestExtractMessageContent:
     """Tests for _extract_message_content function."""
 
-    def test_text_message(self):
+    def test_text_message(self) -> None:
         """Test extracting content - text messages bypass this function."""
-        # Note: _extract_message_content is only called when message.text is empty
-        # A text message with content would be handled directly by the handler
-        message = MockMessage(text="")  # Empty text triggers content extraction
+        message = MockMessage(text="")
         result = _extract_message_content(cast(Message, message))
         assert result == "[Non-text message]"
 
-    def test_photo_with_caption(self):
+    def test_photo_with_caption(self) -> None:
         """Test extracting content from photo with caption."""
         message = MockMessage(caption="My vacation photo")
-        message.photo = [MagicMock()]  # Non-empty photo array
+        message.photo = [MagicMock()]
         result = _extract_message_content(cast(Message, message))
         assert "[Caption: My vacation photo]" in result
         assert "[Photo attached]" in result
 
-    def test_document(self):
+    def test_document(self) -> None:
         """Test extracting content from document."""
         message = MockMessage()
         message.document = MagicMock(file_name="report.pdf")
         result = _extract_message_content(cast(Message, message))
         assert "[Document: report.pdf]" in result
 
-    def test_voice_message(self):
+    def test_voice_message(self) -> None:
         """Test extracting content from voice message."""
         message = MockMessage()
         message.voice = MagicMock()
         result = _extract_message_content(cast(Message, message))
         assert "[Voice message]" in result
 
-    def test_video(self):
+    def test_video(self) -> None:
         """Test extracting content from video."""
         message = MockMessage()
         message.video = MagicMock()
         result = _extract_message_content(cast(Message, message))
         assert "[Video attached]" in result
 
-    def test_audio(self):
+    def test_audio(self) -> None:
         """Test extracting content from audio."""
         message = MockMessage()
         message.audio = MagicMock()
         result = _extract_message_content(cast(Message, message))
         assert "[Audio attached]" in result
 
-    def test_sticker(self):
+    def test_sticker(self) -> None:
         """Test extracting content from sticker."""
         message = MockMessage()
         message.sticker = MagicMock(emoji="😊")
         result = _extract_message_content(cast(Message, message))
         assert "[Sticker: 😊]" in result
 
-    def test_location(self):
+    def test_location(self) -> None:
         """Test extracting content from location."""
         message = MockMessage()
         message.location = MagicMock(latitude=51.5074, longitude=-0.1278)
         result = _extract_message_content(cast(Message, message))
         assert "[Location: 51.5074, -0.1278]" in result
 
-    def test_contact(self):
+    def test_contact(self) -> None:
         """Test extracting content from contact."""
         message = MockMessage()
         message.contact = MagicMock(first_name="John")
         result = _extract_message_content(cast(Message, message))
         assert "[Contact: John]" in result
 
-    def test_sticker_without_emoji(self):
+    def test_sticker_without_emoji(self) -> None:
         """Test extracting content from sticker without emoji."""
         message = MockMessage()
         message.sticker = MagicMock(emoji=None)
         result = _extract_message_content(cast(Message, message))
         assert "[Sticker: emoji]" in result
 
-    def test_contact_without_name(self):
+    def test_contact_without_name(self) -> None:
         """Test extracting content from contact without name."""
         message = MockMessage()
         message.contact = MagicMock(first_name=None)
         result = _extract_message_content(cast(Message, message))
         assert "[Contact: unnamed]" in result
 
-    def test_empty_message(self):
+    def test_empty_message(self) -> None:
         """Test extracting content from empty message."""
         message = MockMessage()
         result = _extract_message_content(cast(Message, message))
         assert result == "[Non-text message]"
 
-    def test_multiple_attachments(self):
+    def test_multiple_attachments(self) -> None:
         """Test extracting content with multiple attachments."""
         message = MockMessage(caption="Check this out")
         message.photo = [MagicMock()]
@@ -325,82 +330,3 @@ class TestExtractMessageContent:
         assert "[Caption: Check this out]" in result
         assert "[Photo attached]" in result
         assert "[Document: file.txt]" in result
-
-
-class TestDatabaseInitializationErrorHandling:
-    """Tests for database initialization error handling.
-
-    These tests verify that when the database is unavailable:
-    1. EpisodeManagerUnavailableError is raised
-    2. Handlers catch this error and inform users
-    3. Messages are not silently dropped
-    """
-
-    @pytest.mark.asyncio
-    async def test_start_handler_handles_db_unavailable(self):
-        """Test that start handler informs user when DB is unavailable."""
-        from bot.handlers import EpisodeManagerUnavailableError
-
-        message = MockMessage(text="/start", user_id=12345)
-
-        with patch(
-            "bot.handlers.get_episode_manager_service",
-            side_effect=EpisodeManagerUnavailableError("DB failed"),
-        ):
-            await start(message)
-
-        # Should still respond but with a warning note
-        assert hasattr(message, "_last_answer")
-        assert "рядом" in message._last_answer  # Bot responds
-        assert "⚠️" in message._last_answer or "не сохраняются" in message._last_answer
-
-    @pytest.mark.asyncio
-    async def test_chat_handler_handles_db_unavailable(self):
-        """Test that chat handler informs user when DB is unavailable."""
-        from bot.handlers import EpisodeManagerUnavailableError
-
-        message = MockMessage(text="Hello", user_id=12345)
-
-        with patch(
-            "bot.handlers.get_episode_manager_service",
-            side_effect=EpisodeManagerUnavailableError("DB failed"),
-        ):
-            await chat(message)
-
-        # Should still respond but with a warning note
-        assert hasattr(message, "_last_answer")
-        assert "услышала" in message._last_answer  # Bot responds
-        assert "⚠️" in message._last_answer or "не сохраняются" in message._last_answer
-
-    @pytest.mark.asyncio
-    async def test_get_episode_manager_service_raises_on_db_failure(self):
-        """Test that service initialization raises on DB failure."""
-        from bot.handlers import (
-            EpisodeManagerUnavailableError,
-            get_episode_manager_service,
-        )
-
-        with patch("bot.handlers.DB_CLIENT_AVAILABLE", True):
-            with patch(
-                "bot.handlers.get_db_client", side_effect=RuntimeError("DB connection failed")
-            ):
-                with pytest.raises(EpisodeManagerUnavailableError) as exc_info:
-                    await get_episode_manager_service()
-
-                assert "Database initialization failed" in str(exc_info.value)
-                assert exc_info.value.cause is not None
-
-    @pytest.mark.asyncio
-    async def test_handler_fallback_on_unexpected_error(self):
-        """Test that handlers have fallback for unexpected errors."""
-        message = MockMessage(text="Hello", user_id=12345)
-
-        with patch(
-            "bot.handlers.get_episode_manager_service",
-            side_effect=Exception("Unexpected error"),
-        ):
-            await chat(message)
-
-        # Should still respond with fallback
-        assert hasattr(message, "_last_answer")
-        assert "услышала" in message._last_answer
