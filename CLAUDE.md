@@ -33,7 +33,7 @@ CI gate (all must pass before merge): `ruff format --check .`, `ruff check .`, `
 4. `LLMService.generate()` — calls LLM via LangChain `ChatOpenAI` wrapper, returns `LLMResponse` with content + token counts
 5. Response persisted to episode, sent back to user
 
-**Service wiring:** module-level singletons via `get_*()` / `set_*()` factory functions (e.g. `get_llm_service()`, `get_episode_manager()`).
+**Service wiring:** Composition root in `src/bot/wiring.py`. `build_app_context()` creates all services once at startup, returns `AppContext` dataclass. `ChatPipeline` receives all deps via constructor (keyword-only args). Handlers receive `pipeline` and `db_client` via aiogram `dp.workflow_data` kwargs injection. Individual services still have `get_*()`/`set_*()` for backward compat (P3 TODO to remove).
 
 **Graceful degradation:** Cognee memory, Supabase DB, and Redis are all optional — the bot falls back to in-memory-only operation when any is missing. Handlers catch service-level exceptions and reply with Russian fallback text.
 
@@ -87,6 +87,50 @@ Required env vars (loaded via `.env` by pydantic-settings):
 - Async-first: all service methods are `async`
 - Commits: present tense, concise ("Add feature" not "Added feature")
 
+## Testing Rules
+
+<important if="writing or modifying tests">
+
+### Structure
+- Flat `tests/test_<module>.py`, one file per module. Group with `class TestFeatureName`
+- Shared fixtures in `tests/conftest.py` (mock_db, mock_llm, mock_delivery). File-local fixtures for module-specific needs only
+- `asyncio_mode = "auto"` — `@pytest.mark.asyncio` decorators optional but allowed for clarity
+
+### Fixtures
+- **Factory functions** (`_make_pipeline(**overrides)`) for objects with variations — preferred pattern
+- **`@pytest.fixture(autouse=True)`** for singleton resets. Do NOT use `setup_method/teardown_method`
+- `yield` for teardown, never `addfinalizer`. Scope defaults to `function`, widen only if setup is genuinely expensive
+- Max fixture chain depth: 2 levels
+
+### Mocking
+- Mock at boundaries (LLM API, Supabase, Redis, Cognee), NOT internal methods between own classes
+- `AsyncMock` for all async methods, never `MagicMock` for `await`-ed calls
+- `spec=RealClass` on mocks to catch attribute typos
+- `patch()` at import site, not definition site
+- Assert outcomes, NOT call order. `assert_has_calls(..., any_order=False)` is an anti-pattern
+- If `mock.a.b.c.return_value` — test is over-coupled, refactor
+
+### Parametrize
+- Use when 3+ tests have identical structure with different data. `pytest.param(..., id="name")` for readable output
+- Do NOT parametrize if cases need different setup/assertion logic
+
+### Markers
+- `@pytest.mark.slow` — tests >2s, skip with `pytest -m "not slow"`
+- `@pytest.mark.integration` — tests hitting real external services
+
+### Coverage
+- CI gate: 80% line coverage with branch coverage (`pytest --cov=bot --cov-branch`)
+- Exclude: `__main__.py`, `if TYPE_CHECKING:` blocks
+- Do NOT chase 100% — diminishing returns after 90%
+
+### Anti-patterns — do NOT
+- Test private methods (`_internal()`) — test through public API
+- Use `asyncio.sleep()` for sync — `await` tasks explicitly or use `asyncio.Event`
+- Write tests longer than 30 lines without extracting helpers
+- Share mutable state between tests
+- Assert broadly (`assert "error" in str(result)`) — assert specific types/messages
+</important>
+
 ## Branching
 
 - `main` — production. `develop` — integration. Feature branches: `feature/<name>`, bugfix: `fix/<name>`
@@ -115,8 +159,40 @@ src/bot/
 - Backward-compatible shims during migration (old imports keep working)
 - Each refactoring phase = separate branch + PR
 
-## Claude Code Tooling
+## gstack
 
-Commands: `/implement`, `/ship`, `/add-feature`, `/check`, `/review`, `/refactor-phase`
+Use `/browse` from gstack for all web browsing. Never use `mcp__claude-in-chrome__*` tools.
+
+### Development Workflow
+
+| Phase | Command | What it does |
+|---|---|---|
+| **Think** | `/office-hours` | Brainstorm feature, generate design doc |
+| **Plan (strategy)** | `/plan-ceo-review` | Challenge scope, find 10-star product |
+| **Plan (architecture)** | `/plan-eng-review` | Lock architecture, data flow, edge cases |
+| **Plan (design)** | `/plan-design-review` | Rate design dimensions, fix gaps |
+| **Build** | `/implement`, `/add-feature` | Orchestrate with domain agents |
+| **Refactor** | `/refactor-phase` | One architectural phase per PR |
+| **Review** | `/review` | Pre-landing diff review (gstack) |
+| **Second opinion** | `/codex` | Independent review via OpenAI Codex |
+| **CI gate** | `/check` | ruff format → ruff check → pyright → pytest |
+| **Debug** | `/investigate` | Systematic root-cause debugging |
+| **Diagnose (bot)** | `diagnose` skill | Bot-specific: config, wiring, handlers, memory |
+| **Ship** | `/ship` | Merge base, tests, review, version bump, PR |
+| **Docs** | `/document-release` | Sync README/ARCHITECTURE/CHANGELOG post-ship |
+| **Retro** | `/retro` | Weekly retrospective with trend tracking |
+
+### Safety Tools
+
+| Command | Use when |
+|---|---|
+| `/careful` | Touching prod, destructive commands |
+| `/freeze` | Restrict edits to one directory |
+| `/guard` | `/careful` + `/freeze` combined |
+| `/unfreeze` | Remove edit restrictions |
+
+### Project Commands & Skills
+
+Commands: `/implement`, `/add-feature`, `/check`, `/refactor-phase`
 Agents: `planner`, `memory-specialist`, `llm-pipeline`, `telegram-handler`, `tester`, `reviewer`, `security-reviewer`, `prompt-engineer`, `refactor-mover`
 Skills: `add-migration`, `add-service`, `add-handler`, `prompt-review`, `diagnose`, `gen-test`, `verify-imports`
