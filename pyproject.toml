@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tg-virtual-girlfriend"
 version = "0.1.0"
-description = "Telegram chatbot (aiogram) with LangChain/LangGraph + mem0 memory + image generation"
+description = "Telegram chatbot (aiogram) with LangChain/LangGraph + cognee memory + image generation"
 requires-python = ">=3.12"
 dependencies = [
   "aiogram>=3.4",
@@ -15,17 +15,23 @@ dependencies = [
   "httpx>=0.27",
   "tenacity>=8.2",
   "loguru>=0.7",
-
   # LangChain stack (minimal core + graph orchestration)
   "langchain-core>=0.2",
   "langchain-community>=0.2",
+  "langchain-openai>=0.1",
   "langgraph>=0.2",
-
-  # Memory (mem0 client)
-  "mem0ai>=0.1.20",
-
+  # Observability
+  "langfuse>=2.0",
+  # Memory (cognee knowledge graph)
+  "cognee>=0.1.21",
   # Optional: storage
   "redis>=5.0",
+  # Proactive messaging scheduler
+  "apscheduler>=3.10",
+  # Database (Supabase)
+  "supabase>=2.0",
+  # Math/ML utilities
+  "numpy>=1.26",
 ]
 
 [project.optional-dependencies]

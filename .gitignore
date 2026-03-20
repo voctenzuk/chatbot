@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Testing
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Ruff
+.ruff_cache/
+
+# Type checking
+.pyright/
+.mypy_cache/
+
+# Local scratch
+EOF
+
+# OS
+.DS_Store
+
+# Env files
+.env
+
+# Node
+node_modules/
+
+# Databases
+*.db
+
+# Claude tooling
+.claude-flow/
+.swarm/
+
+# Architecture docs (generated)
+ARCHITECTURE/
+
+# Agents (generated, top-level only)
+/agents/
+
+# Lock files
+uv.lock
+.gstack/
