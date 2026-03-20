@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -15,6 +15,15 @@ from langchain_openai import ChatOpenAI
 
 
 @dataclass(frozen=True)
+class ToolCall:
+    """A tool call requested by the LLM."""
+
+    name: str
+    args: dict[str, Any]
+    id: str = ""
+
+
+@dataclass(frozen=True)
 class LLMResponse:
     """Immutable result of an LLM generation call."""
 
@@ -22,6 +31,7 @@ class LLMResponse:
     model: str
     tokens_in: int
     tokens_out: int
+    tool_calls: list[ToolCall] = field(default_factory=list)
 
 
 class LLMService:
@@ -41,7 +51,7 @@ class LLMService:
             base_url=settings.llm_base_url,
             api_key=settings.llm_api_key,
             temperature=settings.llm_temperature,
-            max_tokens=settings.llm_max_tokens,  # type: ignore[call-arg]
+            max_completion_tokens=settings.llm_max_tokens,
         )
         logger.info("LLMService initialised with model={}", settings.llm_model)
 
@@ -49,29 +59,55 @@ class LLMService:
     # Public API
     # ------------------------------------------------------------------
 
-    async def generate(self, messages: list[dict[str, str]]) -> LLMResponse:
+    async def generate(
+        self,
+        messages: list[dict[str, str]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> LLMResponse:
         """Send messages to the LLM and return a structured response.
 
         Args:
             messages: List of ``{"role": ..., "content": ...}`` dicts.
+            tools: Optional list of tool schemas (OpenAI function format).
+                   When provided, the model may return tool_calls.
 
         Returns:
-            ``LLMResponse`` with content, model name and token counts.
+            ``LLMResponse`` with content, model name, token counts and tool_calls.
 
         Raises:
             Any exception from the underlying chat model (not swallowed).
         """
         lc_messages = self._convert_messages(messages)
-        result = await self._model.ainvoke(lc_messages)
+
+        if tools:
+            # Always rebind so callers can pass different tool sets across calls
+            active_model = self._model.bind_tools(tools)  # type: ignore[union-attr]
+        else:
+            active_model = self._model
+
+        result = await active_model.ainvoke(lc_messages)  # type: ignore[union-attr]
 
         usage: dict[str, Any] = getattr(result, "usage_metadata", {}) or {}
         meta: dict[str, Any] = getattr(result, "response_metadata", {}) or {}
+
+        # Extract tool calls if present
+        parsed_tool_calls: list[ToolCall] = []
+        raw_tool_calls = getattr(result, "tool_calls", None) or []
+        for tc in raw_tool_calls:
+            parsed_tool_calls.append(
+                ToolCall(
+                    name=tc.get("name", ""),
+                    args=tc.get("args", {}),
+                    id=tc.get("id", ""),
+                )
+            )
 
         return LLMResponse(
             content=str(result.content),
             model=meta.get("model_name", "unknown"),
             tokens_in=usage.get("input_tokens", 0),
             tokens_out=usage.get("output_tokens", 0),
+            tool_calls=parsed_tool_calls,
         )
 
     # ------------------------------------------------------------------

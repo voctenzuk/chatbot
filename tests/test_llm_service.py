@@ -42,7 +42,7 @@ class TestLLMServiceInit:
                 base_url="https://test.api",
                 api_key="sk-test",
                 temperature=0.5,
-                max_tokens=512,
+                max_completion_tokens=512,
             )
 
     def test_llm_service_init_explicit(self):

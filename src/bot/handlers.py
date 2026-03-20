@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+from typing import Any
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
@@ -41,21 +42,27 @@ except ImportError:
     DB_CLIENT_AVAILABLE = False
 
 try:
-    from bot.services.image_service import extract_photo_prompt, get_image_service
+    from bot.services.image_service import SEND_PHOTO_TOOL, get_image_service
 
     IMAGE_SERVICE_AVAILABLE = True
 except ImportError:
-    extract_photo_prompt = None  # type: ignore[assignment]
+    SEND_PHOTO_TOOL = None  # type: ignore[assignment]
     get_image_service = None  # type: ignore[assignment]
     IMAGE_SERVICE_AVAILABLE = False
 
 router = Router()
 
+_background_tasks: set[asyncio.Task[Any]] = set()
+
+
+def _fire_and_forget(coro: Any) -> None:
+    """Schedule a coroutine as a background task with reference tracking."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
 _LLM_FALLBACK = "Прости, у меня сейчас не получается ответить. Попробуй ещё раз чуть позже."
-_PHOTO_INSTRUCTION = (
-    "\nЕсли хочешь отправить фото — добавь маркер [SEND_PHOTO: описание фото на английском] "
-    "в свой ответ. Используй это редко и уместно: селфи, фото еды, виды из окна и т.д."
-)
 _ROLE_MAP = {
     "user": MessageRole.USER,
     "assistant": MessageRole.ASSISTANT,
@@ -144,8 +151,6 @@ async def _generate_llm_response(
 
     # 3. Assemble LLM messages via context builder
     system_prompt = get_system_prompt(user_name=user_name)
-    if IMAGE_SERVICE_AVAILABLE:
-        system_prompt += _PHOTO_INSTRUCTION
     llm_messages = get_context_builder().assemble_for_llm(
         recent_messages=recent_messages,
         semantic_memories=memories,
@@ -153,8 +158,9 @@ async def _generate_llm_response(
         system_prompt=system_prompt,
     )
 
-    # 4. Call LLM
-    return await get_llm_service().generate(llm_messages)
+    # 4. Call LLM (with image tool if available)
+    tools = [SEND_PHOTO_TOOL] if IMAGE_SERVICE_AVAILABLE and SEND_PHOTO_TOOL else None
+    return await get_llm_service().generate(llm_messages, tools=tools)
 
 
 async def _run_cognify_background() -> None:
@@ -165,6 +171,19 @@ async def _run_cognify_background() -> None:
             logger.info("Background cognify completed successfully")
     except Exception as exc:
         logger.warning("Background cognify failed: {}", exc)
+
+
+async def _write_memory_background(mem_service: Any, memory_content: str, user_id: int) -> None:
+    """Write to long-term memory in background. Fire-and-forget."""
+    try:
+        await mem_service.write_factual(content=memory_content, user_id=user_id)
+
+        _memory_write_counts[user_id] = _memory_write_counts.get(user_id, 0) + 1
+        if _memory_write_counts[user_id] >= _COGNIFY_EVERY_N_WRITES:
+            _memory_write_counts[user_id] = 0
+            _fire_and_forget(_run_cognify_background())
+    except Exception as exc:
+        logger.warning("Background memory write failed for user {}: {}", user_id, exc)
 
 
 @router.message(CommandStart())
@@ -210,6 +229,7 @@ async def upgrade(message: Message) -> None:
         title="Plus подписка",
         description="100 сообщений в день + фото. 30 дней.",
         payload="plan:plus",
+        provider_token="",
         currency="XTR",
         prices=[LabeledPrice(label="Plus (30 дней)", amount=385)],
     )
@@ -218,36 +238,46 @@ async def upgrade(message: Message) -> None:
 @router.pre_checkout_query()
 async def pre_checkout(query: PreCheckoutQuery) -> None:
     """Validate payment before processing."""
-    payload = query.invoice_payload or ""
-    if payload.startswith("plan:"):
-        await query.answer(ok=True)
-    else:
-        await query.answer(ok=False, error_message="Неизвестный тип оплаты")
+    try:
+        payload = query.invoice_payload or ""
+        if payload.startswith("plan:"):
+            await query.answer(ok=True)
+        else:
+            await query.answer(ok=False, error_message="Неизвестный тип оплаты")
+    except Exception as e:
+        logger.error("Error in pre_checkout handler for query {}: {}", query.id, e)
+        await query.answer(ok=False, error_message="Ошибка при обработке платежа")
 
 
 @router.message(F.successful_payment)
 async def successful_payment(message: Message) -> None:
     """Handle successful Telegram Stars payment."""
     user_id = message.from_user.id if message.from_user else 0
-    payment = message.successful_payment
-    if not payment:
-        return
+    try:
+        payment = message.successful_payment
+        if not payment:
+            return
 
-    payload = payment.invoice_payload or ""
-    plan_slug = payload.replace("plan:", "") if payload.startswith("plan:") else None
+        payload = payment.invoice_payload or ""
+        plan_slug = payload.replace("plan:", "") if payload.startswith("plan:") else None
 
-    if plan_slug and DB_CLIENT_AVAILABLE and get_db_client is not None:
-        try:
-            db = get_db_client()
-            await db.activate_subscription(user_id, plan_slug)
-            await message.answer("Подписка активирована! Спасибо 💕")
-        except Exception as e:
-            logger.error("Failed to activate subscription for user {}: {}", user_id, e)
-            await message.answer(
-                "Оплата получена, но произошла ошибка. Напиши /start и попробуй снова."
-            )
-    else:
-        await message.answer("Оплата получена! Спасибо 💕")
+        if plan_slug and DB_CLIENT_AVAILABLE and get_db_client is not None:
+            try:
+                db = get_db_client()
+                await db.activate_subscription(user_id, plan_slug)
+                await message.answer("Подписка активирована! Спасибо 💕")
+            except Exception as e:
+                logger.error("Failed to activate subscription for user {}: {}", user_id, e)
+                await message.answer(
+                    "Оплата получена, но произошла ошибка. Напиши /start и попробуй снова."
+                )
+        else:
+            await message.answer("Оплата получена! Спасибо 💕")
+    except Exception as e:
+        logger.error("Error in successful_payment handler for user {}: {}", user_id, e)
+        await message.answer(
+            "Прости, при обработке платежа что-то пошло не так. Напиши /start и попробуй снова."
+        )
 
 
 @router.message()
@@ -300,7 +330,34 @@ async def chat(message: Message) -> None:
             response = _LLM_FALLBACK
             llm_response = None
 
-        # Persist assistant response (with token info when available)
+        # Handle tool calls (image generation via send_photo tool)
+        photo_sent = False
+        if (
+            IMAGE_SERVICE_AVAILABLE
+            and get_image_service is not None
+            and llm_response is not None
+            and llm_response.tool_calls
+        ):
+            for tool_call in llm_response.tool_calls:
+                if tool_call.name == "send_photo":
+                    try:
+                        prompt = tool_call.args.get("prompt", "")
+                        image_bytes = await get_image_service().generate(prompt, user_id)
+                        if image_bytes is not None:
+                            if response and response.strip():
+                                await message.answer(response)
+                            await message.answer_photo(
+                                photo=BufferedInputFile(image_bytes, filename="photo.png"),
+                            )
+                            photo_sent = True
+                    except Exception as img_exc:
+                        logger.warning("Image generation failed for user {}: {}", user_id, img_exc)
+
+        if not photo_sent and response and response.strip():
+            await message.answer(response)
+
+        # Post-send background tasks: persist, track usage, write memory
+        # These run after the user already received the response.
         if llm_response is not None:
             await episode_manager.process_assistant_message(
                 user_id=user_id,
@@ -315,7 +372,6 @@ async def chat(message: Message) -> None:
                 content=response,
             )
 
-        # Track usage (fire-and-forget)
         if DB_CLIENT_AVAILABLE and get_db_client is not None and llm_response is not None:
             try:
                 from bot.services.llm_service import estimate_cost_cents
@@ -334,47 +390,13 @@ async def chat(message: Message) -> None:
             except Exception as exc:
                 logger.warning("Usage tracking failed for user {}: {}", user_id, exc)
 
-        # Write conversation to long-term memory (fire-and-forget)
         if MEMORY_SERVICE_AVAILABLE and get_memory_service is not None and llm_response is not None:
             try:
                 mem_service = get_memory_service()
                 memory_content = f"Пользователь: {content}\nПодруга: {response}"
-                await mem_service.write_factual(
-                    content=memory_content,
-                    user_id=user_id,
-                )
-
-                # Schedule cognify() periodically to build knowledge graph
-                _memory_write_counts[user_id] = _memory_write_counts.get(user_id, 0) + 1
-                if _memory_write_counts[user_id] >= _COGNIFY_EVERY_N_WRITES:
-                    _memory_write_counts[user_id] = 0
-                    asyncio.create_task(_run_cognify_background())
+                _fire_and_forget(_write_memory_background(mem_service, memory_content, user_id))
             except Exception as exc:
                 logger.warning("Memory write failed for user {}: {}", user_id, exc)
-
-        # Check for photo marker and send image if present
-        photo_sent = False
-        if (
-            IMAGE_SERVICE_AVAILABLE
-            and extract_photo_prompt is not None
-            and llm_response is not None
-        ):
-            try:
-                cleaned_text, photo_prompt = extract_photo_prompt(response)
-                if photo_prompt and get_image_service is not None:
-                    image_bytes = await get_image_service().generate(photo_prompt, user_id)
-                    if image_bytes is not None:
-                        if cleaned_text:
-                            await message.answer(cleaned_text)
-                        await message.answer_photo(
-                            photo=BufferedInputFile(image_bytes, filename="photo.png"),
-                        )
-                        photo_sent = True
-            except Exception as img_exc:
-                logger.warning("Image handling failed for user {}: {}", user_id, img_exc)
-
-        if not photo_sent:
-            await message.answer(response)
 
     except EpisodeManagerUnavailableError as e:
         logger.error("Episode manager unavailable for user {}: {}", user_id, e)
@@ -382,6 +404,9 @@ async def chat(message: Message) -> None:
             "Я тебя услышала, но сейчас не могу сохранить сообщение.\n\n"
             "⚠️ Примечание: в данный момент сообщения не сохраняются в базе данных."
         )
+    except RuntimeError as e:
+        logger.error("Episode manager runtime error for user {}: {}", user_id, e)
+        await message.answer(_LLM_FALLBACK)
     except Exception as e:
         logger.error("Error in chat handler for user {}: {}", user_id, e)
         await message.answer("Я тебя услышала, но что-то пошло не так. Попробуй ещё раз.")

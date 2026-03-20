@@ -7,6 +7,8 @@ Tests cover:
 - Synthetic dialogue scenarios
 """
 
+from __future__ import annotations
+
 import pytest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock
@@ -21,6 +23,7 @@ from bot.services.episode_switcher import (
     Episode,
     get_episode_manager,
     set_episode_manager,
+    _MAX_ARCHIVED_EPISODES_PER_USER,
 )
 
 
@@ -82,6 +85,17 @@ class TestSimpleEmbeddingProvider:
         # Similar topics should have some similarity, different topics less
         # With more distinct vocabularies, this should hold
         assert sim_pets >= sim_diff, f"Pet texts should be more similar: {sim_pets} vs {sim_diff}"
+
+    @pytest.mark.asyncio
+    async def test_consistent_dimensions_across_calls(self, provider):
+        """Consecutive embed() calls with the same input return same-dimension vectors."""
+        texts = ["Hello world", "Goodbye world"]
+
+        embeddings_first = await provider.embed(texts)
+        embeddings_second = await provider.embed(texts)
+
+        assert len(embeddings_first[0]) == len(embeddings_second[0])
+        assert len(embeddings_first[1]) == len(embeddings_second[1])
 
 
 class TestEpisodeConfig:
@@ -669,3 +683,40 @@ class TestEdgeCases:
         # Should trigger due to time gap at minimum
         assert decision.should_switch is True
         assert decision.trigger_type in ["time_gap", "combined"]
+
+    @pytest.mark.asyncio
+    async def test_archived_episodes_capped_at_max(self, manager):
+        """Archived episodes per user are capped at _MAX_ARCHIVED_EPISODES_PER_USER."""
+        # Each pair of messages separated by a large time gap creates an archived episode.
+        # We drive more than 50 archives to confirm the cap.
+        episodes_to_create = _MAX_ARCHIVED_EPISODES_PER_USER + 10
+        base_time = datetime.now()
+
+        for i in range(episodes_to_create):
+            # Two messages per episode: one to open, one far enough in the future to close the
+            # previous when the next batch starts. We just need enough time gap (> 1h) between
+            # each pair so the time-gap trigger fires and archives the previous episode.
+            start_ts = base_time + timedelta(hours=i * 2)
+            await manager.add_message(user_id=1, content=f"Episode {i} start", timestamp=start_ts)
+            # Second message stays within the same episode (< 1h gap)
+            await manager.add_message(
+                user_id=1,
+                content=f"Episode {i} end",
+                timestamp=start_ts + timedelta(minutes=10),
+            )
+
+        archived = manager._episodes.get(1, [])
+        assert len(archived) <= _MAX_ARCHIVED_EPISODES_PER_USER
+
+    @pytest.mark.asyncio
+    async def test_switch_history_capped_at_20(self, manager):
+        """Switch history per user is capped at 20 entries."""
+        # Force 30 episode starts by using large time gaps each time.
+        base_time = datetime.now()
+
+        for i in range(30):
+            ts = base_time + timedelta(hours=i * 2)
+            await manager.add_message(user_id=1, content=f"Message {i}", timestamp=ts)
+
+        history = manager._switch_history.get(1, [])
+        assert len(history) <= 20

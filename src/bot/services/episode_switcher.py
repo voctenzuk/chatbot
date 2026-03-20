@@ -8,12 +8,12 @@ This module provides automatic episode switching based on:
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Protocol
 
-import numpy as np
 from loguru import logger
 
 
@@ -30,11 +30,10 @@ class SimpleEmbeddingProvider:
 
     This is a fallback embedding provider that uses a simple bag-of-words
     approach with TF-IDF weighting. Good for testing and local development.
-    """
 
-    def __init__(self) -> None:
-        self._vocabulary: dict[str, int] = {}
-        self._doc_count: int = 0
+    Vocabulary is built fresh per embed() call so vector dimensions are
+    always consistent within a batch and instance state stays bounded.
+    """
 
     def _tokenize(self, text: str) -> list[str]:
         """Simple tokenization (lowercase, split on whitespace/punctuation)."""
@@ -42,70 +41,45 @@ class SimpleEmbeddingProvider:
 
         return re.findall(r"\b\w+\b", text.lower())
 
-    def _get_tfidf_vector(
-        self, text: str, vocab: dict[str, int], idf: dict[str, float]
-    ) -> np.ndarray:
-        """Compute TF-IDF vector for text."""
-        tokens = self._tokenize(text)
-        if not tokens:
-            return np.zeros(len(vocab))
-
-        # Term frequency
-        tf: dict[str, float] = {}
-        for token in tokens:
-            tf[token] = tf.get(token, 0) + 1
-
-        # Normalize TF
-        total_tokens = len(tokens)
-        for token in tf:
-            tf[token] /= total_tokens
-
-        # TF-IDF vector
-        vector = np.zeros(len(vocab))
-        for token, tf_val in tf.items():
-            if token in vocab:
-                vector[vocab[token]] = tf_val * idf.get(token, 1.0)
-
-        return vector
-
     async def embed(self, texts: list[str]) -> list[list[float]]:
         """Embed texts using TF-IDF.
 
-        For a single text or first call, builds vocabulary from all texts.
-        For consistency across calls in the same session, vocabulary accumulates.
+        Vocabulary and document counts are computed from this batch only,
+        making each call self-contained with deterministic vector dimensions.
         """
         if not texts:
             return []
 
-        # Build vocabulary from all texts
+        # Build vocabulary from this batch only (deterministic dimensions)
+        tokenized_texts = [self._tokenize(text) for text in texts]
         all_tokens: set[str] = set()
-        tokenized_texts = []
-        for text in texts:
-            tokens = self._tokenize(text)
-            tokenized_texts.append(tokens)
+        for tokens in tokenized_texts:
             all_tokens.update(tokens)
 
-        # Update global vocabulary
-        for token in all_tokens:
-            if token not in self._vocabulary:
-                self._vocabulary[token] = len(self._vocabulary)
-
-        # Compute IDF
-        self._doc_count += len(texts)
-        idf: dict[str, float] = {}
-        for token in all_tokens:
-            doc_freq = sum(1 for tokens in tokenized_texts if token in tokens)
-            idf[token] = np.log((self._doc_count + 1) / (doc_freq + 1)) + 1
+        vocabulary = {token: idx for idx, token in enumerate(sorted(all_tokens))}
+        vocab_size = len(vocabulary)
+        doc_count = len(texts)
 
         # Compute TF-IDF vectors
         vectors = []
-        for text in texts:
-            vector = self._get_tfidf_vector(text, self._vocabulary, idf)
+        for tokens in tokenized_texts:
+            vector = [0.0] * vocab_size
+            token_counts: dict[str, int] = {}
+            for token in tokens:
+                token_counts[token] = token_counts.get(token, 0) + 1
+
+            for token, count in token_counts.items():
+                if token in vocabulary:
+                    tf = count / len(tokens) if tokens else 0
+                    doc_freq = sum(1 for t in tokenized_texts if token in t)
+                    idf = math.log((doc_count + 1) / (doc_freq + 1)) + 1
+                    vector[vocabulary[token]] = tf * idf
+
             # Normalize
-            norm = np.linalg.norm(vector)
+            norm = sum(v * v for v in vector) ** 0.5
             if norm > 0:
-                vector = vector / norm
-            vectors.append(vector.tolist())
+                vector = [v / norm for v in vector]
+            vectors.append(vector)
 
         return vectors
 
@@ -204,6 +178,9 @@ class SwitchDecision:
     reason: str
     confidence: float  # 0.0 to 1.0
     trigger_type: str | None = None  # "time_gap", "topic_shift", "combined"
+
+
+_MAX_ARCHIVED_EPISODES_PER_USER = 50
 
 
 class EpisodeManager:
@@ -472,6 +449,9 @@ class EpisodeManager:
         if user_id not in self._switch_history:
             self._switch_history[user_id] = []
         self._switch_history[user_id].append(start_time)
+        # Cap history to prevent unbounded growth
+        if len(self._switch_history[user_id]) > 20:
+            self._switch_history[user_id] = self._switch_history[user_id][-20:]
 
         # Create new episode
         episode = Episode(
@@ -490,6 +470,8 @@ class EpisodeManager:
         current = self._current_episode.get(user_id)
         if current and current.messages:
             self._episodes[user_id].append(current)
+            if len(self._episodes[user_id]) > _MAX_ARCHIVED_EPISODES_PER_USER:
+                self._episodes[user_id] = self._episodes[user_id][-_MAX_ARCHIVED_EPISODES_PER_USER:]
             logger.debug(
                 "Archived episode {} for user {} ({} messages, {}s duration)",
                 current.episode_id,
