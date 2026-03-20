@@ -4,6 +4,10 @@ These tests use AsyncMock to avoid real network calls.
 All Cognee API interactions are mocked.
 """
 
+from __future__ import annotations
+
+import asyncio
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -25,7 +29,7 @@ class TestCogneeMemoryServiceUnit:
         client.add = AsyncMock(return_value=None)
         client.cognify = AsyncMock(return_value=None)
         client.search = AsyncMock(return_value=[])
-        client.prune_data = AsyncMock(return_value=None)
+        client.delete_dataset = AsyncMock(return_value=None)
         return client
 
     @pytest.fixture
@@ -155,7 +159,9 @@ class TestCogneeMemoryServiceUnit:
         assert results[0].user_id == 123
         assert results[0].memory_type == MemoryType.TEXT
         assert results[0].memory_category == MemoryCategory.SEMANTIC
-        mock_client.search.assert_called_once_with(query_text="What does user like?")
+        mock_client.search.assert_called_once_with(
+            query_text="What does user like?", datasets=["tg_user_123"]
+        )
 
     @pytest.mark.asyncio
     async def test_search_success_with_dicts(self, service, mock_client):
@@ -206,11 +212,31 @@ class TestCogneeMemoryServiceUnit:
         await service.cognify()
 
         mock_client.cognify.assert_called_once()
+        call_kwargs = mock_client.cognify.call_args.kwargs
+        assert set(call_kwargs["datasets"]) == {"tg_user_123", "tg_user_456"}
+        assert len(service._pending_datasets) == 0
+
+    @pytest.mark.asyncio
+    async def test_cognify_skips_when_no_pending(self, service, mock_client):
+        """Test cognify does nothing when no pending datasets."""
+        await service.cognify()
+
+        mock_client.cognify.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cognify_concurrent_calls_safe(self, service, mock_client):
+        """Test that concurrent cognify calls don't lose pending datasets."""
+        service._pending_datasets.add("tg_user_1")
+        service._pending_datasets.add("tg_user_2")
+
+        await asyncio.gather(service.cognify(), service.cognify())
+
         assert len(service._pending_datasets) == 0
 
     @pytest.mark.asyncio
     async def test_cognify_error(self, service, mock_client):
         """Test cognify error propagation."""
+        service._pending_datasets.add("tg_user_123")
         mock_client.cognify.side_effect = Exception("Cognify failed")
 
         with pytest.raises(Exception, match="Cognify failed"):
@@ -243,13 +269,13 @@ class TestCogneeMemoryServiceUnit:
 
         await service.delete_user_memories(user_id=123)
 
-        mock_client.prune_data.assert_called_once()
+        mock_client.delete_dataset.assert_called_once_with("tg_user_123")
         assert "tg_user_123" not in service._pending_datasets
 
     @pytest.mark.asyncio
     async def test_delete_user_memories_error(self, service, mock_client):
         """Test error handling when deleting memories."""
-        mock_client.prune_data.side_effect = Exception("Delete failed")
+        mock_client.delete_dataset.side_effect = Exception("Delete failed")
 
         with pytest.raises(Exception, match="Delete failed"):
             await service.delete_user_memories(user_id=123)
@@ -265,7 +291,7 @@ class TestCogneeMemoryServiceIntegrationPatterns:
         client.add = AsyncMock(return_value=None)
         client.cognify = AsyncMock(return_value=None)
         client.search = AsyncMock(return_value=[])
-        client.prune_data = AsyncMock(return_value=None)
+        client.delete_dataset = AsyncMock(return_value=None)
         return client
 
     @pytest.fixture

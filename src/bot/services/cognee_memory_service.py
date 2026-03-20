@@ -19,6 +19,7 @@ Configuration (via environment variables or .env file):
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from datetime import datetime
 from typing import Any, Protocol
@@ -42,9 +43,9 @@ class CogneeClientProtocol(Protocol):
     """Protocol for cognee client operations to enable testing."""
 
     async def add(self, data: str | list[str], dataset_name: str | None = None) -> None: ...
-    async def cognify(self) -> None: ...
-    async def search(self, query_text: str) -> list[Any]: ...
-    async def prune_data(self) -> None: ...
+    async def cognify(self, datasets: list[str] | None = None) -> None: ...
+    async def search(self, query_text: str, datasets: list[str] | None = None) -> list[Any]: ...
+    async def delete_dataset(self, dataset_name: str) -> None: ...
 
 
 class CogneeClient:
@@ -61,14 +62,16 @@ class CogneeClient:
         else:
             await self._cognee.add(data)
 
-    async def cognify(self) -> None:
-        await self._cognee.cognify()
+    async def cognify(self, datasets: list[str] | None = None) -> None:
+        await self._cognee.cognify(datasets=datasets)
 
-    async def search(self, query_text: str) -> list[Any]:
-        return await self._cognee.search(query_text)  # type: ignore[no-any-return]
+    async def search(self, query_text: str, datasets: list[str] | None = None) -> list[Any]:
+        return await self._cognee.search(  # type: ignore[no-any-return]
+            query_text, datasets=datasets
+        )
 
-    async def prune_data(self) -> None:
-        await self._cognee.prune.prune_data()
+    async def delete_dataset(self, dataset_name: str) -> None:
+        await self._cognee.prune.prune_data(metadata=dataset_name)
 
 
 class CogneeMemoryService:
@@ -103,6 +106,7 @@ class CogneeMemoryService:
         """
         self._client: CogneeClientProtocol
         self._pending_datasets: set[str] = set()
+        self._cognify_lock = asyncio.Lock()
 
         if client is not None:
             self._client = client
@@ -299,13 +303,18 @@ class CogneeMemoryService:
         After cognify, GRAPH_COMPLETION search becomes available for richer
         results that leverage entity relationships.
         """
-        try:
-            await self._client.cognify()
-            self._pending_datasets.clear()
-            logger.info("Cognify completed successfully")
-        except Exception as e:
-            logger.error("Cognify failed: {}", e)
-            raise
+        async with self._cognify_lock:
+            pending = list(self._pending_datasets)
+            if not pending:
+                return
+            try:
+                await self._client.cognify(datasets=pending)
+                for dataset in pending:
+                    self._pending_datasets.discard(dataset)
+                logger.info("Cognify completed successfully for {} datasets", len(pending))
+            except Exception as e:
+                logger.error("Cognify failed: {}", e)
+                raise
 
     async def search(
         self,
@@ -330,8 +339,9 @@ class CogneeMemoryService:
         Returns:
             List of matching MemoryFact objects.
         """
+        user_dataset = self._user_dataset(user_id)
         try:
-            results = await self._client.search(query_text=query)
+            results = await self._client.search(query_text=query, datasets=[user_dataset])
 
             memories: list[MemoryFact] = []
             for result in results[:limit]:
@@ -376,8 +386,9 @@ class CogneeMemoryService:
         Returns:
             List of MemoryFact objects.
         """
+        user_dataset = self._user_dataset(user_id)
         try:
-            results = await self._client.search(query_text="*")
+            results = await self._client.search(query_text="*", datasets=[user_dataset])
 
             memories: list[MemoryFact] = []
             for result in results[:limit]:
@@ -409,9 +420,10 @@ class CogneeMemoryService:
             user_id: User identifier.
             run_id: Optional run_id to scope deletion.
         """
+        dataset = self._user_dataset(user_id)
         try:
-            await self._client.prune_data()
-            self._pending_datasets.discard(self._user_dataset(user_id))
+            await self._client.delete_dataset(dataset)
+            self._pending_datasets.discard(dataset)
             logger.info(
                 "Deleted memories for user {} (run_id={})",
                 user_id,
