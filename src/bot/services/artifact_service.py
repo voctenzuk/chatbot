@@ -362,15 +362,9 @@ class ArtifactService:
             Artifact or None if not found.
         """
         try:
-            response = (
-                self._db._client.table("artifacts")
-                .select("*")
-                .eq("id", artifact_id)
-                .maybe_single()
-                .execute()
-            )
-            if response.data:
-                return Artifact.from_row(response.data)
+            row = await self._db.get_artifact_row_by_id(artifact_id)
+            if row:
+                return Artifact.from_row(row)
             return None
         except Exception as e:
             logger.error("Failed to get artifact {}: {}", artifact_id, e)
@@ -387,13 +381,9 @@ class ArtifactService:
             Artifact or None if not found.
         """
         try:
-            response = self._db._client.rpc(
-                "get_artifact_by_sha256",
-                {"p_user_id": user_id, "p_sha256": sha256},
-            ).execute()
-
-            if response.data and len(response.data) > 0:
-                artifact_id = response.data[0]["artifact_id"]
+            rows = await self._db.rpc_get_artifact_by_sha256(user_id, sha256)
+            if rows:
+                artifact_id = rows[0]["artifact_id"]
                 return await self.get_artifact_by_id(artifact_id)
             return None
         except Exception as e:
@@ -416,16 +406,10 @@ class ArtifactService:
         """
         try:
             kind_strings = [k.value for k in text_kinds] if text_kinds else None
-            response = self._db._client.rpc(
-                "get_artifacts_for_episode",
-                {
-                    "p_episode_id": episode_id,
-                    "p_text_kinds": kind_strings,
-                },
-            ).execute()
+            rows = await self._db.rpc_get_artifacts_for_episode(episode_id, kind_strings)
 
             results = []
-            for row in response.data or []:
+            for row in rows:
                 artifact = Artifact.from_row(row)
 
                 # Parse text surrogates JSONB
@@ -461,9 +445,10 @@ class ArtifactService:
 
         # Delete from database (cascades to artifact_text)
         try:
-            self._db._client.table("artifacts").delete().eq("id", artifact_id).execute()
-            logger.info("Deleted artifact {}", artifact_id)
-            return True
+            deleted = await self._db.delete_artifact_row(artifact_id)
+            if deleted:
+                logger.info("Deleted artifact {}", artifact_id)
+            return deleted
         except Exception as e:
             logger.error("Failed to delete artifact {}: {}", artifact_id, e)
             return False
@@ -487,24 +472,19 @@ class ArtifactService:
         Returns:
             Artifact ID.
         """
-        response = self._db._client.rpc(
-            "add_artifact",
-            {
-                "p_user_id": user_id,
-                "p_type": artifact_type.value,
-                "p_mime_type": mime_type,
-                "p_size_bytes": size_bytes,
-                "p_sha256": sha256,
-                "p_storage_key": storage_key,
-                "p_storage_provider": storage_provider,
-                "p_original_filename": original_filename,
-                "p_thread_id": thread_id,
-                "p_episode_id": episode_id,
-                "p_message_id": message_id,
-            },
-        ).execute()
-
-        return response.data
+        return await self._db.rpc_add_artifact(
+            user_id=user_id,
+            artifact_type=artifact_type.value,
+            mime_type=mime_type,
+            size_bytes=size_bytes,
+            sha256=sha256,
+            storage_key=storage_key,
+            storage_provider=storage_provider,
+            original_filename=original_filename,
+            thread_id=thread_id,
+            episode_id=episode_id,
+            message_id=message_id,
+        )
 
     async def _update_artifact_context(
         self,
@@ -532,11 +512,8 @@ class ArtifactService:
         if message_id:
             updates["message_id"] = message_id
 
-        response = (
-            self._db._client.table("artifacts").update(updates).eq("id", artifact_id).execute()
-        )
-
-        return Artifact.from_row(response.data[0])
+        rows = await self._db.update_artifact_row(artifact_id, updates)
+        return Artifact.from_row(rows[0])
 
     # -------------------------------------------------------------------------
     # Text Surrogate Management
@@ -568,21 +545,16 @@ class ArtifactService:
         Returns:
             Created ArtifactText.
         """
-        response = self._db._client.rpc(
-            "upsert_artifact_text",
-            {
-                "p_artifact_id": artifact_id,
-                "p_text_kind": text_kind.value,
-                "p_text_content": text_content,
-                "p_chunk_index": chunk_index,
-                "p_chunk_total": chunk_total,
-                "p_embedding": embedding,
-                "p_confidence": confidence,
-                "p_model_used": model_used,
-            },
-        ).execute()
-
-        text_id = response.data
+        text_id = await self._db.rpc_upsert_artifact_text(
+            artifact_id=artifact_id,
+            text_kind=text_kind.value,
+            text_content=text_content,
+            chunk_index=chunk_index,
+            chunk_total=chunk_total,
+            embedding=embedding,
+            confidence=confidence,
+            model_used=model_used,
+        )
 
         # Update artifact processing status
         await self._update_processing_status(artifact_id, ArtifactProcessingStatus.COMPLETED)
@@ -717,17 +689,9 @@ class ArtifactService:
             List of ArtifactText records.
         """
         try:
-            query = (
-                self._db._client.table("artifact_text").select("*").eq("artifact_id", artifact_id)
-            )
-
-            if text_kinds:
-                kind_values = [k.value for k in text_kinds]
-                query = query.in_("text_kind", kind_values)
-
-            response = query.order("text_kind").order("chunk_index").execute()
-
-            return [ArtifactText.from_row(row) for row in response.data or []]
+            kind_values = [k.value for k in text_kinds] if text_kinds else None
+            rows = await self._db.get_artifact_text_rows(artifact_id, kind_values)
+            return [ArtifactText.from_row(row) for row in rows]
         except Exception as e:
             logger.error("Failed to get text surrogates for {}: {}", artifact_id, e)
             return []
@@ -735,15 +699,9 @@ class ArtifactService:
     async def _get_text_by_id(self, text_id: str) -> ArtifactText | None:
         """Get text surrogate by ID."""
         try:
-            response = (
-                self._db._client.table("artifact_text")
-                .select("*")
-                .eq("id", text_id)
-                .maybe_single()
-                .execute()
-            )
-            if response.data:
-                return ArtifactText.from_row(response.data)
+            row = await self._db.get_artifact_text_row_by_id(text_id)
+            if row:
+                return ArtifactText.from_row(row)
             return None
         except Exception as e:
             logger.error("Failed to get text surrogate {}: {}", text_id, e)
@@ -783,7 +741,7 @@ class ArtifactService:
             if error:
                 updates["processing_error"] = error
 
-            self._db._client.table("artifacts").update(updates).eq("id", artifact_id).execute()
+            await self._db.update_artifact_row(artifact_id, updates)
         except Exception as e:
             logger.error("Failed to update processing status for {}: {}", artifact_id, e)
 
@@ -811,17 +769,12 @@ class ArtifactService:
             List of TextSurrogateForContext for inclusion in LLM context.
         """
         try:
-            response = self._db._client.rpc(
-                "get_artifact_surrogates_for_context",
-                {
-                    "p_episode_id": episode_id,
-                    "p_max_per_artifact": max_per_artifact,
-                    "p_max_total": max_total,
-                },
-            ).execute()
+            rows = await self._db.rpc_get_artifact_surrogates_for_context(
+                episode_id, max_per_artifact, max_total
+            )
 
             results = []
-            for row in response.data or []:
+            for row in rows:
                 results.append(
                     TextSurrogateForContext(
                         artifact_id=str(row["artifact_id"]),

@@ -129,9 +129,7 @@ class ProactiveScheduler:
             from bot.services.db_client import get_db_client
 
             db = get_db_client()
-            result = db._client.table("threads").select("telegram_user_id").execute()
-            if result.data:
-                return [row["telegram_user_id"] for row in result.data]
+            return await db.get_all_user_ids()
         except Exception as exc:
             logger.warning("Failed to get active users: {}", exc)
         return []

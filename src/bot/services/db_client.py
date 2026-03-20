@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
-from unittest.mock import MagicMock
 
 from loguru import logger
 
@@ -102,7 +101,7 @@ class Episode:
             status=row["status"],
             started_at=datetime.fromisoformat(row["started_at"].replace("Z", "+00:00"))
             if row.get("started_at")
-            else datetime.now(),
+            else datetime.now(timezone.utc),
             ended_at=datetime.fromisoformat(row["ended_at"].replace("Z", "+00:00"))
             if row.get("ended_at")
             else None,
@@ -214,7 +213,7 @@ class DatabaseClient:
         if client is not None:
             # Use provided client (for testing)
             self._client = client
-            self._is_mock = isinstance(client, MagicMock)
+            self._is_mock = type(client).__name__ == "MagicMock"
             logger.info("DatabaseClient initialized with custom client")
             return
 
@@ -236,7 +235,7 @@ class DatabaseClient:
         # Initialize the Supabase client
         if create_client is None:
             raise RuntimeError("supabase package is not installed")
-        self._client: DatabaseClientProtocol = create_client(self._url, self._key)
+        self._client = create_client(self._url, self._key)
         logger.info("DatabaseClient initialized with Supabase")
 
     async def get_or_create_thread(self, telegram_user_id: int) -> Thread:
@@ -254,8 +253,11 @@ class DatabaseClient:
                 {"p_telegram_user_id": telegram_user_id},
             ).execute()
 
-            # The function returns a UUID, we need to fetch the thread
-            thread_id = response.data
+            row = self._extract_rpc_row(response.data)
+            if row and isinstance(row, dict) and "id" in row:
+                return Thread.from_row(row)
+            # Fallback: scalar UUID returned
+            thread_id = self._extract_rpc_uuid(response.data, "get_or_create_thread")
             return await self.get_thread_by_id(thread_id)
         except Exception as e:
             logger.error("Failed to get or create thread for user {}: {}", telegram_user_id, e)
@@ -293,11 +295,11 @@ class DatabaseClient:
                 self._client.table("threads")
                 .select("*")
                 .eq("telegram_user_id", telegram_user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
             if response.data:
-                return Thread.from_row(response.data)
+                return Thread.from_row(response.data[0])
             return None
         except Exception as e:
             logger.error("Failed to get thread for user {}: {}", telegram_user_id, e)
@@ -326,7 +328,10 @@ class DatabaseClient:
                 },
             ).execute()
 
-            episode_id = response.data
+            row = self._extract_rpc_row(response.data)
+            if row and isinstance(row, dict) and "id" in row:
+                return Episode.from_row(row)
+            episode_id = self._extract_rpc_uuid(response.data, "start_new_episode")
             return await self.get_episode_by_id(episode_id)
         except Exception as e:
             logger.error("Failed to start new episode for thread {}: {}", thread_id, e)
@@ -383,13 +388,15 @@ class DatabaseClient:
                 .update(
                     {
                         "status": "closed",
-                        "ended_at": datetime.now().isoformat(),
-                        "updated_at": datetime.now().isoformat(),
+                        "ended_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
                     }
                 )
                 .eq("id", episode_id)
                 .execute()
             )
+            if not response.data:
+                raise RuntimeError(f"close_episode: no rows updated for {episode_id}")
             return Episode.from_row(response.data[0])
         except Exception as e:
             logger.error("Failed to close episode {}: {}", episode_id, e)
@@ -430,7 +437,10 @@ class DatabaseClient:
                 },
             ).execute()
 
-            message_id = response.data
+            row = self._extract_rpc_row(response.data)
+            if row and isinstance(row, dict) and "id" in row:
+                return EpisodeMessage.from_row(row)
+            message_id = self._extract_rpc_uuid(response.data, "add_message_to_current_episode")
             return await self.get_message_by_id(message_id)
         except Exception as e:
             logger.error("Failed to add message for user {}: {}", telegram_user_id, e)
@@ -453,6 +463,39 @@ class DatabaseClient:
         except Exception as e:
             logger.error("Failed to get message {}: {}", message_id, e)
             raise
+
+    @staticmethod
+    def _extract_rpc_uuid(data: Any, fn_name: str) -> str:
+        """Extract a UUID string from an RPC response.
+
+        Supabase-py may return the scalar as a plain string, a list with one
+        element, or a list of dicts like [{"fn_name": "uuid"}].
+        """
+        if isinstance(data, str):
+            return data
+        if isinstance(data, list) and data:
+            item = data[0]
+            if isinstance(item, str):
+                return item
+            if isinstance(item, dict):
+                # Try fn_name key first, then any single value
+                if fn_name in item:
+                    return str(item[fn_name])
+                vals = list(item.values())
+                if vals:
+                    return str(vals[0])
+        return str(data)
+
+    @staticmethod
+    def _extract_rpc_row(data: Any) -> dict[str, Any] | None:
+        """Extract a row dict from an RPC response that returns TABLE.
+
+        RETURNS TABLE RPCs come back as a list of dicts.
+        Returns the first dict if available, otherwise None.
+        """
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            return data[0]
+        return None
 
     @staticmethod
     def _normalize_message_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -497,7 +540,7 @@ class DatabaseClient:
             ).execute()
 
             # Normalize rows: RPC returns 'message_id' but from_row expects 'id'
-            normalized_rows = [self._normalize_message_row(row) for row in response.data]
+            normalized_rows = [self._normalize_message_row(row) for row in response.data or []]
             return [EpisodeMessage.from_row(row) for row in normalized_rows]
         except Exception as e:
             logger.error("Failed to get recent messages for user {}: {}", telegram_user_id, e)
@@ -526,7 +569,7 @@ class DatabaseClient:
                 .limit(limit)
                 .execute()
             )
-            return [EpisodeMessage.from_row(row) for row in response.data]
+            return [EpisodeMessage.from_row(row) for row in response.data or []]
         except Exception as e:
             logger.error("Failed to get messages for episode {}: {}", episode_id, e)
             return []
@@ -550,7 +593,7 @@ class DatabaseClient:
             if status:
                 query = query.eq("status", status)
             response = query.order("started_at", desc=False).execute()
-            return [Episode.from_row(row) for row in response.data]
+            return [Episode.from_row(row) for row in response.data or []]
         except Exception as e:
             logger.error("Failed to get episodes for thread {}: {}", thread_id, e)
             return []
@@ -584,7 +627,10 @@ class DatabaseClient:
                 },
             ).execute()
 
-            summary_id = response.data
+            row = self._extract_rpc_row(response.data)
+            if row and isinstance(row, dict) and "id" in row:
+                return EpisodeSummary.from_row(row)
+            summary_id = self._extract_rpc_uuid(response.data, "upsert_episode_summary")
             return await self.get_summary_by_id(summary_id)
         except Exception as e:
             logger.error("Failed to upsert summary for episode {}: {}", episode_id, e)
@@ -631,7 +677,7 @@ class DatabaseClient:
             if kind:
                 query = query.eq("kind", kind)
             response = query.order("created_at", desc=True).execute()
-            return [EpisodeSummary.from_row(row) for row in response.data]
+            return [EpisodeSummary.from_row(row) for row in response.data or []]
         except Exception as e:
             logger.error("Failed to get summaries for episode {}: {}", episode_id, e)
             return []
@@ -726,6 +772,187 @@ class DatabaseClient:
                 e,
             )
 
+    async def get_all_user_ids(self) -> list[int]:
+        """Get all telegram user IDs from threads table."""
+        try:
+            response = self._client.table("threads").select("telegram_user_id").execute()
+            return [row["telegram_user_id"] for row in response.data or []]
+        except Exception as e:
+            logger.error("Failed to get all user IDs: {}", e)
+            return []
+
+    async def get_artifact_row_by_id(self, artifact_id: str) -> dict[str, Any] | None:
+        """Get a single artifact row by ID."""
+        try:
+            response = (
+                self._client.table("artifacts")
+                .select("*")
+                .eq("id", artifact_id)
+                .maybe_single()
+                .execute()
+            )
+            return response.data if response.data else None
+        except Exception as e:
+            logger.error("Failed to get artifact row {}: {}", artifact_id, e)
+            return None
+
+    async def rpc_get_artifact_by_sha256(self, user_id: int, sha256: str) -> list[dict[str, Any]]:
+        """Call get_artifact_by_sha256 RPC."""
+        try:
+            response = self._client.rpc(
+                "get_artifact_by_sha256",
+                {"p_user_id": user_id, "p_sha256": sha256},
+            ).execute()
+            return response.data or []
+        except Exception as e:
+            logger.error("Failed to get artifact by sha256: {}", e)
+            return []
+
+    async def rpc_get_artifacts_for_episode(
+        self, episode_id: str, text_kinds: list[str] | None = None
+    ) -> list[dict[str, Any]]:
+        """Call get_artifacts_for_episode RPC."""
+        try:
+            response = self._client.rpc(
+                "get_artifacts_for_episode",
+                {
+                    "p_episode_id": episode_id,
+                    "p_text_kinds": text_kinds,
+                },
+            ).execute()
+            return response.data or []
+        except Exception as e:
+            logger.error("Failed to get artifacts for episode {}: {}", episode_id, e)
+            return []
+
+    async def delete_artifact_row(self, artifact_id: str) -> bool:
+        """Delete an artifact row by ID."""
+        try:
+            self._client.table("artifacts").delete().eq("id", artifact_id).execute()
+            return True
+        except Exception as e:
+            logger.error("Failed to delete artifact row {}: {}", artifact_id, e)
+            return False
+
+    async def rpc_add_artifact(
+        self,
+        user_id: int,
+        artifact_type: str,
+        mime_type: str,
+        size_bytes: int,
+        sha256: str,
+        storage_key: str,
+        storage_provider: str,
+        original_filename: str | None = None,
+        thread_id: str | None = None,
+        episode_id: str | None = None,
+        message_id: str | None = None,
+    ) -> Any:
+        """Call add_artifact RPC and return the raw response data."""
+        response = self._client.rpc(
+            "add_artifact",
+            {
+                "p_user_id": user_id,
+                "p_type": artifact_type,
+                "p_mime_type": mime_type,
+                "p_size_bytes": size_bytes,
+                "p_sha256": sha256,
+                "p_storage_key": storage_key,
+                "p_storage_provider": storage_provider,
+                "p_original_filename": original_filename,
+                "p_thread_id": thread_id,
+                "p_episode_id": episode_id,
+                "p_message_id": message_id,
+            },
+        ).execute()
+        return response.data
+
+    async def update_artifact_row(
+        self, artifact_id: str, updates: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """Update an artifact row and return updated rows."""
+        response = self._client.table("artifacts").update(updates).eq("id", artifact_id).execute()
+        return response.data or []
+
+    async def rpc_upsert_artifact_text(
+        self,
+        artifact_id: str,
+        text_kind: str,
+        text_content: str,
+        chunk_index: int | None = None,
+        chunk_total: int | None = None,
+        embedding: list[float] | None = None,
+        confidence: float | None = None,
+        model_used: str | None = None,
+    ) -> Any:
+        """Call upsert_artifact_text RPC and return the raw response data."""
+        response = self._client.rpc(
+            "upsert_artifact_text",
+            {
+                "p_artifact_id": artifact_id,
+                "p_text_kind": text_kind,
+                "p_text_content": text_content,
+                "p_chunk_index": chunk_index,
+                "p_chunk_total": chunk_total,
+                "p_embedding": embedding,
+                "p_confidence": confidence,
+                "p_model_used": model_used,
+            },
+        ).execute()
+        return response.data
+
+    async def get_artifact_text_rows(
+        self,
+        artifact_id: str,
+        text_kinds: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get artifact text rows for an artifact, optionally filtered by kinds."""
+        try:
+            query = self._client.table("artifact_text").select("*").eq("artifact_id", artifact_id)
+            if text_kinds:
+                query = query.in_("text_kind", text_kinds)
+            response = query.order("text_kind").order("chunk_index").execute()
+            return response.data or []
+        except Exception as e:
+            logger.error("Failed to get artifact text rows for {}: {}", artifact_id, e)
+            return []
+
+    async def get_artifact_text_row_by_id(self, text_id: str) -> dict[str, Any] | None:
+        """Get a single artifact text row by ID."""
+        try:
+            response = (
+                self._client.table("artifact_text")
+                .select("*")
+                .eq("id", text_id)
+                .maybe_single()
+                .execute()
+            )
+            return response.data if response.data else None
+        except Exception as e:
+            logger.error("Failed to get artifact text row {}: {}", text_id, e)
+            return None
+
+    async def rpc_get_artifact_surrogates_for_context(
+        self,
+        episode_id: str,
+        max_per_artifact: int,
+        max_total: int,
+    ) -> list[dict[str, Any]]:
+        """Call get_artifact_surrogates_for_context RPC."""
+        try:
+            response = self._client.rpc(
+                "get_artifact_surrogates_for_context",
+                {
+                    "p_episode_id": episode_id,
+                    "p_max_per_artifact": max_per_artifact,
+                    "p_max_total": max_total,
+                },
+            ).execute()
+            return response.data or []
+        except Exception as e:
+            logger.error("Failed to get artifact surrogates for context: {}", e)
+            return []
+
     async def activate_subscription(
         self,
         telegram_user_id: int,
@@ -764,7 +991,7 @@ class DatabaseClient:
             )
 
             # Insert new subscription with 30-day period
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             period_end = now + timedelta(days=30)
             provider_sub_id = f"tg_stars_{telegram_user_id}_{now.timestamp():.0f}"
 
