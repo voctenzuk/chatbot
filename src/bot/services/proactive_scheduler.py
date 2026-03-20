@@ -23,12 +23,12 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from aiogram import Bot
 from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
 
 from bot.config import settings
+from bot.ports import MessageDeliveryPort
 from bot.services.llm_service import get_llm_service
 from bot.services.system_prompt import get_system_prompt
 
@@ -49,8 +49,8 @@ class ProactiveScheduler:
     persistence. Falls back to in-memory job store if Redis unavailable.
     """
 
-    def __init__(self, bot: Bot) -> None:
-        self._bot = bot
+    def __init__(self, delivery: MessageDeliveryPort) -> None:
+        self._delivery = delivery
         self._send_counts: dict[int, dict[str, int]] = {}
 
         jobstores: dict[str, MemoryJobStore] = {}
@@ -190,7 +190,7 @@ class ProactiveScheduler:
                 tags=["proactive"],
             )
             llm_response = await get_llm_service().generate(messages, config=lf_config)
-            await self._bot.send_message(chat_id=user_id, text=llm_response.content)
+            await self._delivery.send_text(chat_id=user_id, text=llm_response.content)
             self._record_send(user_id)
 
             try:

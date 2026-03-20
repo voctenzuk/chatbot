@@ -138,24 +138,43 @@ class TestHandlerToolCallIntegration:
         mock_image_svc = MagicMock()
         mock_image_svc.generate = AsyncMock(return_value=b"fake_image_bytes")
 
+        mock_llm_svc = AsyncMock()
+        mock_llm_svc.generate = AsyncMock(return_value=llm_resp)
+
         with (
             patch("bot.handlers.get_episode_manager_service", return_value=mock_episode_mgr),
-            patch("bot.handlers.get_llm_service") as mock_llm,
-            patch("bot.handlers.get_image_service", return_value=mock_image_svc),
-            patch("bot.handlers.IMAGE_SERVICE_AVAILABLE", True),
-            patch("bot.handlers.MEMORY_SERVICE_AVAILABLE", False),
+            patch("bot.chat_pipeline.get_llm_service", return_value=mock_llm_svc),
+            patch("bot.chat_pipeline.get_image_service", return_value=mock_image_svc),
+            patch("bot.chat_pipeline.IMAGE_SERVICE_AVAILABLE", True),
+            patch("bot.chat_pipeline.MEMORY_SERVICE_AVAILABLE", False),
+            patch("bot.chat_pipeline.DB_CLIENT_AVAILABLE", False),
             patch("bot.handlers.DB_CLIENT_AVAILABLE", False),
+            patch(
+                "bot.chat_pipeline.get_langfuse_service",
+                return_value=MagicMock(create_config=MagicMock(return_value={})),
+            ),
+            patch(
+                "bot.chat_pipeline.get_context_builder",
+                return_value=MagicMock(
+                    assemble_for_llm=MagicMock(
+                        return_value=[
+                            {"role": "system", "content": "sys"},
+                            {"role": "user", "content": "пришли фото"},
+                        ]
+                    )
+                ),
+            ),
+            patch("bot.chat_pipeline.get_system_prompt", return_value="sys"),
         ):
-            mock_llm.return_value.generate = AsyncMock(return_value=llm_resp)
-
             from bot.handlers import chat
 
             await chat(mock_msg)
 
         mock_msg.answer_photo.assert_called_once()
-        mock_image_svc.generate.assert_called_once_with("cute selfie", 123)
-        # Text response also sent before photo
-        mock_msg.answer.assert_called_once_with("Вот держи!")
+        # generate() is called twice: once in the tool execution loop (LLM feedback),
+        # once in handle_message step 4 (actual image delivery)
+        assert mock_image_svc.generate.call_count == 2
+        mock_image_svc.generate.assert_any_call("cute selfie", 123)
 
     @pytest.mark.asyncio
     async def test_chat_without_tool_call_sends_text_only(self) -> None:
@@ -196,15 +215,33 @@ class TestHandlerToolCallIntegration:
         mock_episode_mgr.process_assistant_message = AsyncMock()
         mock_episode_mgr.get_recent_messages = AsyncMock(return_value=[])
 
+        mock_llm_svc = AsyncMock()
+        mock_llm_svc.generate = AsyncMock(return_value=llm_resp)
+
         with (
             patch("bot.handlers.get_episode_manager_service", return_value=mock_episode_mgr),
-            patch("bot.handlers.get_llm_service") as mock_llm,
-            patch("bot.handlers.IMAGE_SERVICE_AVAILABLE", True),
-            patch("bot.handlers.MEMORY_SERVICE_AVAILABLE", False),
+            patch("bot.chat_pipeline.get_llm_service", return_value=mock_llm_svc),
+            patch("bot.chat_pipeline.IMAGE_SERVICE_AVAILABLE", True),
+            patch("bot.chat_pipeline.MEMORY_SERVICE_AVAILABLE", False),
+            patch("bot.chat_pipeline.DB_CLIENT_AVAILABLE", False),
             patch("bot.handlers.DB_CLIENT_AVAILABLE", False),
+            patch(
+                "bot.chat_pipeline.get_langfuse_service",
+                return_value=MagicMock(create_config=MagicMock(return_value={})),
+            ),
+            patch(
+                "bot.chat_pipeline.get_context_builder",
+                return_value=MagicMock(
+                    assemble_for_llm=MagicMock(
+                        return_value=[
+                            {"role": "system", "content": "sys"},
+                            {"role": "user", "content": "привет"},
+                        ]
+                    )
+                ),
+            ),
+            patch("bot.chat_pipeline.get_system_prompt", return_value="sys"),
         ):
-            mock_llm.return_value.generate = AsyncMock(return_value=llm_resp)
-
             from bot.handlers import chat
 
             await chat(mock_msg)
@@ -254,16 +291,34 @@ class TestHandlerToolCallIntegration:
         mock_image_svc = MagicMock()
         mock_image_svc.generate = AsyncMock(return_value=None)  # generation failed
 
+        mock_llm_svc = AsyncMock()
+        mock_llm_svc.generate = AsyncMock(return_value=llm_resp)
+
         with (
             patch("bot.handlers.get_episode_manager_service", return_value=mock_episode_mgr),
-            patch("bot.handlers.get_llm_service") as mock_llm,
-            patch("bot.handlers.get_image_service", return_value=mock_image_svc),
-            patch("bot.handlers.IMAGE_SERVICE_AVAILABLE", True),
-            patch("bot.handlers.MEMORY_SERVICE_AVAILABLE", False),
+            patch("bot.chat_pipeline.get_llm_service", return_value=mock_llm_svc),
+            patch("bot.chat_pipeline.get_image_service", return_value=mock_image_svc),
+            patch("bot.chat_pipeline.IMAGE_SERVICE_AVAILABLE", True),
+            patch("bot.chat_pipeline.MEMORY_SERVICE_AVAILABLE", False),
+            patch("bot.chat_pipeline.DB_CLIENT_AVAILABLE", False),
             patch("bot.handlers.DB_CLIENT_AVAILABLE", False),
+            patch(
+                "bot.chat_pipeline.get_langfuse_service",
+                return_value=MagicMock(create_config=MagicMock(return_value={})),
+            ),
+            patch(
+                "bot.chat_pipeline.get_context_builder",
+                return_value=MagicMock(
+                    assemble_for_llm=MagicMock(
+                        return_value=[
+                            {"role": "system", "content": "sys"},
+                            {"role": "user", "content": "фото"},
+                        ]
+                    )
+                ),
+            ),
+            patch("bot.chat_pipeline.get_system_prompt", return_value="sys"),
         ):
-            mock_llm.return_value.generate = AsyncMock(return_value=llm_resp)
-
             from bot.handlers import chat
 
             await chat(mock_msg)

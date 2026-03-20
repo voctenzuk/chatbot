@@ -320,27 +320,12 @@ def patched_handlers(
     mock_context_builder: MagicMock,
     mock_db_client: AsyncMock,
 ) -> Any:
-    """Patch all service accessors used in handlers."""
+    """Patch all service accessors used in handlers + chat_pipeline."""
     with (
+        # handlers-level patches (episode manager, DB for /start and payment handlers)
         patch(
             "bot.handlers.get_episode_manager_service",
             return_value=mock_episode_manager,
-        ),
-        patch(
-            "bot.handlers.get_memory_service",
-            return_value=mock_memory_service,
-        ),
-        patch(
-            "bot.handlers.get_llm_service",
-            return_value=mock_llm_service,
-        ),
-        patch(
-            "bot.handlers.get_context_builder",
-            return_value=mock_context_builder,
-        ),
-        patch(
-            "bot.handlers.get_system_prompt",
-            return_value="You are a helpful assistant.",
         ),
         patch(
             "bot.handlers.DB_CLIENT_AVAILABLE",
@@ -350,8 +335,41 @@ def patched_handlers(
             "bot.handlers.get_db_client",
             return_value=mock_db_client,
         ),
+        # chat_pipeline-level patches (LLM, memory, context, DB for pipeline logic)
         patch(
-            "bot.handlers.get_langfuse_service",
+            "bot.chat_pipeline.get_memory_service",
+            return_value=mock_memory_service,
+        ),
+        patch(
+            "bot.chat_pipeline.MEMORY_SERVICE_AVAILABLE",
+            True,
+        ),
+        patch(
+            "bot.chat_pipeline.get_llm_service",
+            return_value=mock_llm_service,
+        ),
+        patch(
+            "bot.chat_pipeline.get_context_builder",
+            return_value=mock_context_builder,
+        ),
+        patch(
+            "bot.chat_pipeline.get_system_prompt",
+            return_value="You are a helpful assistant.",
+        ),
+        patch(
+            "bot.chat_pipeline.DB_CLIENT_AVAILABLE",
+            True,
+        ),
+        patch(
+            "bot.chat_pipeline.get_db_client",
+            return_value=mock_db_client,
+        ),
+        patch(
+            "bot.chat_pipeline.IMAGE_SERVICE_AVAILABLE",
+            False,
+        ),
+        patch(
+            "bot.chat_pipeline.get_langfuse_service",
             return_value=MagicMock(create_config=MagicMock(return_value={})),
         ),
     ):

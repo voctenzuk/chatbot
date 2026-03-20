@@ -151,7 +151,7 @@ def patched_handlers(
     mock_context_builder,
     mock_langfuse_service,
 ):
-    """Patch all service accessors used in handlers."""
+    """Patch all service accessors used in handlers and chat_pipeline."""
     mock_episode_manager.get_current_episode = AsyncMock(return_value=None)
     with (
         patch(
@@ -159,26 +159,27 @@ def patched_handlers(
             new=AsyncMock(return_value=mock_episode_manager),
         ),
         patch(
-            "bot.handlers.get_memory_service",
+            "bot.chat_pipeline.get_memory_service",
             return_value=mock_memory_service,
         ),
         patch(
-            "bot.handlers.get_llm_service",
+            "bot.chat_pipeline.get_llm_service",
             return_value=mock_llm_service,
         ),
         patch(
-            "bot.handlers.get_context_builder",
+            "bot.chat_pipeline.get_context_builder",
             return_value=mock_context_builder,
         ),
         patch(
-            "bot.handlers.get_system_prompt",
+            "bot.chat_pipeline.get_system_prompt",
             return_value="You are a helpful assistant.",
         ),
         patch(
-            "bot.handlers.get_langfuse_service",
+            "bot.chat_pipeline.get_langfuse_service",
             return_value=mock_langfuse_service,
         ),
         patch("bot.handlers.DB_CLIENT_AVAILABLE", False),
+        patch("bot.chat_pipeline.DB_CLIENT_AVAILABLE", False),
     ):
         yield {
             "episode_manager": mock_episode_manager,
@@ -267,13 +268,13 @@ class TestChatLLMIntegration:
 
 
 class TestToolExecutionLoop:
-    """Tests for the tool execution loop inside _generate_llm_response."""
+    """Tests for the tool execution loop inside ChatPipeline._generate_llm_response."""
 
     @pytest.mark.asyncio
     async def test_tool_loop_calls_llm_twice_and_returns_final_text(self, patched_handlers):
         """When LLM returns tool_calls, _generate_llm_response calls LLM a second time
         and returns the final text from that second call."""
-        from bot.handlers import _generate_llm_response
+        from bot.chat_pipeline import ChatPipeline
 
         tool_call = ToolCall(name="send_photo", args={"prompt": "a sunset"}, id="tc_001")
 
@@ -297,18 +298,18 @@ class TestToolExecutionLoop:
         )
 
         with (
-            patch("bot.handlers.IMAGE_SERVICE_AVAILABLE", True),
-            patch("bot.handlers.SEND_PHOTO_TOOL", {"name": "send_photo"}),
+            patch("bot.chat_pipeline.IMAGE_SERVICE_AVAILABLE", True),
+            patch("bot.chat_pipeline.SEND_PHOTO_TOOL", {"name": "send_photo"}),
             patch(
-                "bot.handlers.get_image_service",
+                "bot.chat_pipeline.get_image_service",
                 return_value=AsyncMock(generate=AsyncMock(return_value=b"fake_image_bytes")),
             ),
         ):
-            result = await _generate_llm_response(
+            pipeline = ChatPipeline(episode_manager=patched_handlers["episode_manager"])
+            result = await pipeline._generate_llm_response(
                 user_id=42,
                 content="send me a sunset photo",
                 user_name="Sasha",
-                episode_manager=patched_handlers["episode_manager"],
             )
 
         # LLM must have been called twice
@@ -328,7 +329,7 @@ class TestToolExecutionLoop:
     @pytest.mark.asyncio
     async def test_tool_loop_second_call_has_tool_message(self, patched_handlers):
         """The second LLM call must include a tool-role message in its conversation."""
-        from bot.handlers import _generate_llm_response
+        from bot.chat_pipeline import ChatPipeline
 
         tool_call = ToolCall(name="send_photo", args={"prompt": "a cat"}, id="tc_002")
 
@@ -351,18 +352,18 @@ class TestToolExecutionLoop:
         patched_handlers["llm_service"].generate = generate_mock
 
         with (
-            patch("bot.handlers.IMAGE_SERVICE_AVAILABLE", True),
-            patch("bot.handlers.SEND_PHOTO_TOOL", {"name": "send_photo"}),
+            patch("bot.chat_pipeline.IMAGE_SERVICE_AVAILABLE", True),
+            patch("bot.chat_pipeline.SEND_PHOTO_TOOL", {"name": "send_photo"}),
             patch(
-                "bot.handlers.get_image_service",
+                "bot.chat_pipeline.get_image_service",
                 return_value=AsyncMock(generate=AsyncMock(return_value=b"img")),
             ),
         ):
-            await _generate_llm_response(
+            pipeline = ChatPipeline(episode_manager=patched_handlers["episode_manager"])
+            await pipeline._generate_llm_response(
                 user_id=99,
                 content="show me a cat",
                 user_name=None,
-                episode_manager=patched_handlers["episode_manager"],
             )
 
         # Inspect the messages passed to the second generate() call
@@ -377,7 +378,7 @@ class TestToolExecutionLoop:
     @pytest.mark.asyncio
     async def test_tool_loop_skipped_when_no_tool_calls(self, patched_handlers):
         """When the first LLM response has no tool_calls, LLM is called only once."""
-        from bot.handlers import _generate_llm_response
+        from bot.chat_pipeline import ChatPipeline
 
         patched_handlers["llm_service"].generate = AsyncMock(
             return_value=LLMResponse(
@@ -389,11 +390,11 @@ class TestToolExecutionLoop:
             )
         )
 
-        result = await _generate_llm_response(
+        pipeline = ChatPipeline(episode_manager=patched_handlers["episode_manager"])
+        result = await pipeline._generate_llm_response(
             user_id=7,
             content="hello",
             user_name=None,
-            episode_manager=patched_handlers["episode_manager"],
         )
 
         assert patched_handlers["llm_service"].generate.call_count == 1

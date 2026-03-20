@@ -92,8 +92,31 @@ Required env vars (loaded via `.env` by pydantic-settings):
 - `main` — production. `develop` — integration. Feature branches: `feature/<name>`, bugfix: `fix/<name>`
 - Squash or rebase merge preferred
 
+## Target Architecture (Selective Composite)
+
+The project is being refactored from flat `services/` to domain-grouped packages with selective hexagonal ports. See memory for full rationale.
+
+**Target structure:**
+```
+src/bot/
+    ports.py                    # 3 Protocols: LLMPort, MemoryPort, MessageDeliveryPort
+    chat_pipeline.py            # Core chat logic extracted from handlers.py
+    adapters/telegram/          # Thin aiogram handlers + proactive scheduler
+    conversation/               # episode_manager, episode_switcher, context_builder, summarizer, system_prompt
+    memory/                     # cognee_service, models, cleanup
+    llm/                        # service, models
+    media/                      # image_service, artifact_service, storage_backend
+    infra/                      # db_client
+```
+
+**Principles:**
+- Protocol only where swapping is realistic (LLM, Memory, MessageDelivery) — NOT for every service
+- Domain grouping for organization, not architectural purity
+- Backward-compatible shims during migration (old imports keep working)
+- Each refactoring phase = separate branch + PR
+
 ## Claude Code Tooling
 
-Commands: `/implement`, `/ship`, `/add-feature`, `/check`, `/review`
-Agents: `planner`, `memory-specialist`, `llm-pipeline`, `telegram-handler`, `tester`, `reviewer`, `security-reviewer`, `prompt-engineer`
-Skills: `add-migration`, `add-service`, `add-handler`, `prompt-review`, `diagnose`
+Commands: `/implement`, `/ship`, `/add-feature`, `/check`, `/review`, `/refactor-phase`
+Agents: `planner`, `memory-specialist`, `llm-pipeline`, `telegram-handler`, `tester`, `reviewer`, `security-reviewer`, `prompt-engineer`, `refactor-mover`
+Skills: `add-migration`, `add-service`, `add-handler`, `prompt-review`, `diagnose`, `gen-test`, `verify-imports`

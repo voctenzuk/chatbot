@@ -12,21 +12,22 @@ class TestProactiveSchedulerCore:
     """Tests for ProactiveScheduler logic (anti-spam, quiet hours, sending)."""
 
     @pytest.fixture
-    def mock_bot(self):
-        bot = MagicMock()
-        bot.send_message = AsyncMock()
-        return bot
+    def mock_delivery(self):
+        delivery = MagicMock()
+        delivery.send_text = AsyncMock()
+        delivery.send_photo = AsyncMock()
+        return delivery
 
     @pytest.fixture
-    def scheduler(self, mock_bot):
+    def scheduler(self, mock_delivery):
         with patch("bot.services.proactive_scheduler.AsyncIOScheduler"):
             from bot.services.proactive_scheduler import ProactiveScheduler
 
-            return ProactiveScheduler(mock_bot)
+            return ProactiveScheduler(mock_delivery)
 
     @pytest.mark.asyncio
-    async def test_send_proactive_message_happy_path(self, scheduler, mock_bot):
-        """Message is generated via LLM and sent via bot.send_message."""
+    async def test_send_proactive_message_happy_path(self, scheduler, mock_delivery):
+        """Message is generated via LLM and sent via delivery.send_text."""
         from bot.services.llm_service import LLMResponse
 
         mock_llm = MagicMock()
@@ -36,11 +37,15 @@ class TestProactiveSchedulerCore:
             )
         )
 
+        mock_langfuse = MagicMock()
+        mock_langfuse.create_config.return_value = {}
+
         with (
             patch("bot.services.proactive_scheduler.get_llm_service", return_value=mock_llm),
             patch("bot.services.proactive_scheduler.get_system_prompt", return_value="test prompt"),
             patch.object(scheduler, "_is_quiet_hours", return_value=False),
             patch("bot.services.episode_manager.get_episode_manager") as mock_em,
+            patch("bot.services.langfuse_service.get_langfuse_service", return_value=mock_langfuse),
         ):
             mock_manager = MagicMock()
             mock_manager.db = None
@@ -49,20 +54,20 @@ class TestProactiveSchedulerCore:
             result = await scheduler.send_proactive_message(123, "утреннее приветствие")
 
         assert result is True
-        mock_bot.send_message.assert_called_once_with(chat_id=123, text="Доброе утро! ☀️")
+        mock_delivery.send_text.assert_called_once_with(chat_id=123, text="Доброе утро! ☀️")
         mock_llm.generate.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_send_skipped_during_quiet_hours(self, scheduler, mock_bot):
+    async def test_send_skipped_during_quiet_hours(self, scheduler, mock_delivery):
         """No message sent during quiet hours (23:00-08:00)."""
         with patch.object(scheduler, "_is_quiet_hours", return_value=True):
             result = await scheduler.send_proactive_message(123, "test")
 
         assert result is False
-        mock_bot.send_message.assert_not_called()
+        mock_delivery.send_text.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_anti_spam_blocks_after_max(self, scheduler, mock_bot):
+    async def test_anti_spam_blocks_after_max(self, scheduler, mock_delivery):
         """After 3 messages/day, further sends are blocked."""
         from bot.services.llm_service import LLMResponse
 
@@ -71,11 +76,15 @@ class TestProactiveSchedulerCore:
             return_value=LLMResponse(content="hey", model="test", tokens_in=5, tokens_out=10)
         )
 
+        mock_langfuse = MagicMock()
+        mock_langfuse.create_config.return_value = {}
+
         with (
             patch("bot.services.proactive_scheduler.get_llm_service", return_value=mock_llm),
             patch("bot.services.proactive_scheduler.get_system_prompt", return_value="test"),
             patch.object(scheduler, "_is_quiet_hours", return_value=False),
             patch("bot.services.episode_manager.get_episode_manager") as mock_em,
+            patch("bot.services.langfuse_service.get_langfuse_service", return_value=mock_langfuse),
         ):
             mock_manager = MagicMock()
             mock_manager.db = None
@@ -88,10 +97,10 @@ class TestProactiveSchedulerCore:
             result = await scheduler.send_proactive_message(123, "test")
             assert result is False
 
-        assert mock_bot.send_message.call_count == 3
+        assert mock_delivery.send_text.call_count == 3
 
     @pytest.mark.asyncio
-    async def test_send_llm_error_swallowed(self, scheduler, mock_bot):
+    async def test_send_llm_error_swallowed(self, scheduler, mock_delivery):
         """LLM error is caught and logged, returns False."""
         mock_llm = MagicMock()
         mock_llm.generate = AsyncMock(side_effect=Exception("LLM timeout"))
@@ -104,18 +113,18 @@ class TestProactiveSchedulerCore:
             result = await scheduler.send_proactive_message(123, "test")
 
         assert result is False
-        mock_bot.send_message.assert_not_called()
+        mock_delivery.send_text.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_send_telegram_error_swallowed(self, scheduler, mock_bot):
-        """bot.send_message error is caught and logged, returns False."""
+    async def test_send_telegram_error_swallowed(self, scheduler, mock_delivery):
+        """delivery.send_text error is caught and logged, returns False."""
         from bot.services.llm_service import LLMResponse
 
         mock_llm = MagicMock()
         mock_llm.generate = AsyncMock(
             return_value=LLMResponse(content="hi", model="test", tokens_in=5, tokens_out=10)
         )
-        mock_bot.send_message = AsyncMock(side_effect=Exception("Forbidden: bot was blocked"))
+        mock_delivery.send_text = AsyncMock(side_effect=Exception("Forbidden: bot was blocked"))
 
         with (
             patch("bot.services.proactive_scheduler.get_llm_service", return_value=mock_llm),
@@ -145,17 +154,18 @@ class TestProactiveSchedulerTriggers:
     """Tests for scheduler trigger methods."""
 
     @pytest.fixture
-    def mock_bot(self):
-        bot = MagicMock()
-        bot.send_message = AsyncMock()
-        return bot
+    def mock_delivery(self):
+        delivery = MagicMock()
+        delivery.send_text = AsyncMock()
+        delivery.send_photo = AsyncMock()
+        return delivery
 
     @pytest.fixture
-    def scheduler(self, mock_bot):
+    def scheduler(self, mock_delivery):
         with patch("bot.services.proactive_scheduler.AsyncIOScheduler"):
             from bot.services.proactive_scheduler import ProactiveScheduler
 
-            return ProactiveScheduler(mock_bot)
+            return ProactiveScheduler(mock_delivery)
 
     @pytest.mark.asyncio
     async def test_morning_check_sends_to_all_users(self, scheduler):

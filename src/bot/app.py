@@ -26,7 +26,10 @@ async def _amain() -> None:
     try:
         from bot.services.proactive_scheduler import ProactiveScheduler, set_proactive_scheduler
 
-        scheduler = ProactiveScheduler(bot)
+        from bot.adapters import TelegramDelivery
+
+        delivery = TelegramDelivery(bot)
+        scheduler = ProactiveScheduler(delivery)
         scheduler.start()
         set_proactive_scheduler(scheduler)
     except Exception as e:
