@@ -49,7 +49,7 @@ Lock the execution plan:
 
 | Agent | When |
 |---|---|
-| `memory-specialist` | Cognee pipeline, episodes, dual-layer memory |
+| `memory-specialist` | mem0 pipeline, episodes, dual-layer memory |
 | `llm-pipeline` | LLM service, context building, prompt engineering |
 | `telegram-handler` | aiogram 3 handlers, commands, callbacks, middleware |
 | `prompt-engineer` | System prompt quality, injection defense, token efficiency |

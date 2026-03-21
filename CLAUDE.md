@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Telegram AI companion chatbot: aiogram 3 (async, long-polling), LangChain for LLM orchestration, Cognee for knowledge-graph memory. Russian-language bot personality. Package manager: **uv**.
+Telegram AI companion chatbot: aiogram 3 (async, long-polling), LangChain for LLM orchestration, mem0 for long-term memory. Russian-language bot personality. Package manager: **uv**.
 
 ## Commands
 
@@ -23,14 +23,14 @@ CI gate (all must pass): `uvx ruff format --check .` → `uvx ruff check .` → 
 
 **Request flow** (per message in `handlers.py`):
 1. `EpisodeManager.process_user_message()` — persist + auto-switch episodes (8h gap or topic shift)
-2. `CogneeMemoryService.search()` — vector search over knowledge graph (best-effort)
+2. `Mem0MemoryService.search()` — vector similarity search over extracted facts (best-effort)
 3. `ContextBuilder.assemble_for_llm()` — merge history + semantic memories + system prompt
 4. `LLMService.generate()` — LLM call via LangChain, returns `LLMResponse`
 5. Response persisted to episode, sent to user
 
 **Wiring:** Composition root in `src/bot/wiring.py`. `build_app_context()` → `AppContext` dataclass. `ChatPipeline` receives deps via constructor. Handlers get `pipeline` + `db_client` via `dp.workflow_data`.
 
-**Graceful degradation:** Cognee, Supabase, Redis are optional — bot falls back to in-memory operation.
+**Graceful degradation:** mem0, Supabase, Redis are optional — bot falls back to in-memory operation.
 
 ## Critical Rules
 
@@ -42,8 +42,8 @@ All service methods MUST be async. Use `ainvoke()` / `astream()` for LangChain, 
 Catch-all `@router.message()` with NO filter MUST be registered LAST. Insert new handlers ABOVE it. Always try/except with Russian fallback text.
 </important>
 
-<important if="working with Cognee or memory">
-All `cognee.add()` calls MUST include `dataset_name=f"tg_user_{user_id}"` for user isolation. Never call `prune_data()`.
+<important if="working with mem0 or memory">
+All mem0 operations MUST use `user_id=f"tg_user_{user_id}"` for per-user data isolation. Memory writes go through `Mem0MemoryService.write_factual()` which auto-extracts facts via LLM.
 </important>
 
 <important if="writing imports from LangChain">
@@ -81,4 +81,4 @@ Loaded via `.claude/rules/` with path-based globs (only when touching relevant f
 - `python-style.md` — ruff, pyright, imports, async patterns (`**/*.py`)
 - `aiogram.md` — handler conventions, filters, FSM, middleware (`handlers.py`, `app.py`)
 - `langchain.md` — imports, async invocation, LLMService pattern (`bot.llm/**`)
-- `memory-system.md` — Cognee, episodes, context builder (`bot.memory/**`, `bot.conversation/**`)
+- `memory-system.md` — mem0, episodes, context builder (`bot.memory/**`, `bot.conversation/**`)

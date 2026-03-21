@@ -1,18 +1,18 @@
 # Telegram AI Companion Bot
 
-Russian-language AI companion chatbot built with **aiogram 3** (async, long-polling), **LangChain** for LLM orchestration, and **Cognee** for knowledge-graph memory. Package manager: **uv**.
+Russian-language AI companion chatbot built with **aiogram 3** (async, long-polling), **LangChain** for LLM orchestration, and **mem0** for long-term memory with automatic fact extraction. Package manager: **uv**.
 
 ## Features
 
 - Conversational AI persona with consistent personality (Russian language)
 - **Short-term memory** — sliding window of recent messages per episode
-- **Long-term memory** — knowledge graph via Cognee (vector search + graph relationships)
+- **Long-term memory** — mem0 with automatic fact extraction, dedup, and conflict resolution
 - **Automatic episode management** — new episodes on 8h time gap or topic shift (cosine similarity < 0.7)
 - **Episode summarization** — running/chunk/final summaries for context compression
 - **Image generation** — LLM decides when to send photos via tool calling (OpenAI Images API)
 - **Proactive messaging** — bot initiates conversations based on context and schedule
 - **Monetization** — Telegram Stars payments, subscription tiers, usage tracking
-- **Graceful degradation** — Cognee, Supabase, Redis are all optional; bot works without them
+- **Graceful degradation** — mem0, Supabase, Redis are all optional; bot works without them
 
 ## Quick start
 
@@ -40,8 +40,8 @@ All configuration via `.env` file (loaded by pydantic-settings).
 | `LLM_MODEL` | No | `kimi-k2p5` | Model name |
 | `LLM_TEMPERATURE` | No | `0.7` | Generation temperature |
 | `LLM_MAX_TOKENS` | No | `1024` | Max completion tokens |
-| `COGNEE_VECTOR_DB_PROVIDER` | No | `lancedb` | Vector DB backend for Cognee |
-| `COGNEE_GRAPH_DB_PROVIDER` | No | `kuzu` | Graph DB backend for Cognee |
+| `MEM0_SUPABASE_CONNECTION_STRING` | No | — | Supabase pgvector connection for mem0 |
+| `EMBEDDER_MODEL` | No | `text-embedding-3-small` | Embedding model for mem0 |
 | `REDIS_URL` | No | — | Redis for rate-limiting; falls back gracefully |
 | `IMAGE_BASE_URL` | No | OpenAI | Image generation API endpoint |
 | `IMAGE_API_KEY` | No | — | Image generation API key |
@@ -79,7 +79,7 @@ src/bot/
     handlers.py          # Thin aiogram handlers (receive deps via kwargs)
     ports.py             # Protocol definitions (LLMPort, MemoryPort, MessageDeliveryPort)
     conversation/        # Episode management, context building, summarization
-    memory/              # Cognee service, memory models, cleanup
+    memory/              # mem0 service, memory models, cleanup
     llm/                 # LLM service wrapper
     media/               # Image generation, artifacts, storage
     infra/               # Database client, Langfuse observability
@@ -89,5 +89,5 @@ src/bot/
 ## Notes
 
 - Per-user isolation via `telegram_user_id` across all services
-- All Cognee operations use `dataset_name=f"tg_user_{user_id}"` for data isolation
+- All mem0 operations use `user_id=f"tg_user_{user_id}"` for data isolation
 - All service methods are async; LangChain uses `.ainvoke()` only

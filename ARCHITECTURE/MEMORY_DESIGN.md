@@ -1,6 +1,6 @@
 # MEMORY_DESIGN — “Human-like” Memory for the Telegram Bot
 
-**Status:** implemented (original design draft, updated to reflect Cognee migration from mem0)
+**Status:** implemented (original design draft, migrated from Cognee to mem0)
 **Scope:** memory only (text + attachments). Payments/subscriptions are out of scope except for metadata/limits.
 
 ## Goals
@@ -16,7 +16,7 @@
 ---
 
 ## Conceptual Model
-We implement **four product layers**, backed by **Cognee** for knowledge-graph memory.
+We implement **four product layers**, backed by **mem0** for knowledge-graph memory.
 
 ### Product Layers (canonical in our app)
 1) **Working memory (short-term)**
@@ -31,19 +31,19 @@ We implement **four product layers**, backed by **Cognee** for knowledge-graph m
 
 3) **Semantic long-term memory**
    - durable “memory units” (facts, preferences, decisions)
-   - vector search + knowledge graph via Cognee
+   - vector search + knowledge graph via mem0
 
 4) **Artifacts (attachments)**
    - stored as objects + derived text representations (vision/OCR/transcripts/summaries/chunks)
    - searchable independently
 
-### Mapping to Cognee
-Cognee provides: **chunk storage** (via `cognee.add()`) + **knowledge graph** (via `cognee.cognify()`) + **vector search** (via `cognee.search()`).
+### Mapping to mem0
+mem0 provides: **automatic fact extraction** (via `mem0.add()`) + **conflict resolution** (ADD/UPDATE/DELETE) + **vector search** (via `mem0.search()`).
 
-- **Our working memory** stays in our DB (fast, deterministic). Not stored in Cognee.
-- **Our episode summaries** and conversation pairs are written to Cognee datasets (per-user: `tg_user_{user_id}`).
-- **Our durable memory units** are stored as raw text in Cognee; `cognify()` builds a knowledge graph from them for richer retrieval.
-- **Artifacts** remain in our DB+storage; only high-level conclusions may be written to Cognee.
+- **Our working memory** stays in our DB (fast, deterministic). Not stored in mem0.
+- **Our episode summaries** and conversation pairs are written to mem0 (per-user: `tg_user_{user_id}`).
+- **Our durable memory units** are auto-extracted as structured facts by mem0's LLM pipeline.
+- **Artifacts** remain in our DB+storage; only high-level conclusions may be written to mem0.
 
 ---
 
@@ -53,9 +53,9 @@ We standardize ids for consistent retrieval.
 - `user_id` = Telegram user id (stable)
 - `thread_id` = one conversational stream per user/chat (stable)
 - `episode_id` = one “chapter” within thread (changes over time)
-- `dataset_name` (Cognee) = `tg_user_{user_id}` (per-user isolation)
+- `user_id` (mem0) = `tg_user_{user_id}` (per-user isolation)
 
-**Rule:** All Cognee writes MUST include `dataset_name=f"tg_user_{user_id}"` for user isolation.
+**Rule:** All mem0 writes MUST use `user_id=f"tg_user_{user_id}"` for per-user data isolation.
 
 ---
 
@@ -144,7 +144,7 @@ We standardize ids for consistent retrieval.
 On close:
 - generate **final summary**
 - extract **memory units** (facts to remember)
-- write to Cognee (knowledge graph)
+- write to mem0 (knowledge graph)
 
 ---
 
@@ -171,36 +171,31 @@ On episode close:
 
 ---
 
-## Cognee Integration (Knowledge Graph + Vector Search)
-We use Cognee as a **long-term memory engine** with knowledge graph capabilities.
+## mem0 Integration (Automatic Fact Extraction + Vector Search)
+We use mem0 as a **long-term memory engine** with automatic fact extraction and conflict resolution.
 
-### What Cognee provides
-- Chunk storage via `cognee.add()` — fast, stores raw text
-- Knowledge graph construction via `cognee.cognify()` — builds entity/relationship graph
-- Vector similarity search via `cognee.search()` — retrieves relevant chunks
+### What mem0 provides
+- Automatic fact extraction from conversation via LLM (Russian-language prompt)
+- Conflict resolution: "latest truth wins" (ADD/UPDATE/DELETE decisions by LLM)
+- Vector similarity search via `mem0.search()`
+- Per-memory TTL/expiration (emotional 7d, session 30d, identity forever)
+- Deduplication of redundant facts
 
 ### What we implement ourselves
 - Episode management (Telegram-specific)
 - Attachments pipeline + artifact index
-- TTL/decay maintenance (`MemoryCleanupService`)
-- User isolation via per-user datasets (`tg_user_{user_id}`)
+- Russian extraction prompt with companion categories
+- TTL classification by content keywords
 
-### Write policy (selective)
-We do **not** store every message.
-
-We store:
-- conversation pairs (user message + bot response) via `write_factual()`
-- `cognify()` runs periodically (every 10 writes) to build the knowledge graph
-
-We ignore (at cognee level):
-- greetings, filler (handled by future fact extraction layer)
-- system messages
+### Write policy
+Every conversation pair (user message + bot response) goes through `write_factual()`.
+mem0's LLM pipeline automatically extracts relevant facts and ignores filler.
 
 ### Implementation details
-- `CogneeMemoryService` wraps all Cognee operations
-- `cognify()` uses a single lock to prevent concurrent graph builds
-- Search returns `MemoryFact` objects with `MemoryType` and `MemoryCategory` enums
-- Raw search results are converted to typed data models at the service boundary
+- `Mem0MemoryService` wraps all mem0 operations via `AsyncMemory` client
+- `cognify()` is a no-op (mem0 extracts automatically on `add()`)
+- Search returns `MemoryFact` objects with actual metadata (not hardcoded defaults)
+- Supabase pgvector as vector store with HNSW index
 
 ---
 
@@ -216,16 +211,16 @@ We follow a **dual-memory read flow** (production pattern):
    - `running_summary`
    - last `N` messages
    - short artifact surrogates
-2) In parallel, query Cognee:
-   - `cognee_service.search(query, user_id, limit=5)`
-   - searches within user's dataset (`tg_user_{user_id}`)
+2) In parallel, query mem0:
+   - `mem0_service.search(query, user_id, limit=5)`
+   - searches within user's memories (`tg_user_{user_id}`)
 3) If user asks about an attachment:
    - retrieve from `artifact_text` index (pgvector)
 4) Assemble prompt:
    - system/persona
    - running summary + open loops
    - recent messages
-   - top-K Cognee memories (compressed)
+   - top-K mem0 memories (compressed)
    - relevant artifact snippets
 5) Prune duplicates and resolve conflicts
 
@@ -248,7 +243,7 @@ We follow a **dual-memory read flow** (production pattern):
 - chunk by structure
 - store `file_summary` + chunk embeddings in `artifact_text`
 
-### What goes to Cognee
+### What goes to mem0
 Only high-level conclusions, e.g.
 - “User sent a screenshot of ImportError: create_client…”
 
@@ -260,7 +255,7 @@ A build is considered correct when:
 - Prompts stay within budget via summaries + top-K retrieval.
 - Long-term recall works for durable facts/decisions.
 - Attachments are retrievable and referenced via text surrogates.
-- Cognee storage does not bloat (selective write + TTL/decay maintenance).
+- mem0 storage does not bloat (selective write + TTL/decay maintenance).
 
 ---
 
@@ -269,7 +264,7 @@ A build is considered correct when:
 All core memory features are implemented:
 - Episode management with auto-switching (time gap + topic shift) — `conversation/episode_manager.py`
 - Running/chunk/final summarization — `conversation/summarizer.py`
-- Cognee-backed semantic memory — `memory/cognee_service.py`
+- mem0-backed semantic memory — `memory/mem0_service.py`
 - TTL/decay cleanup — `memory/cleanup.py`
 - Artifact pipeline — `media/artifact_service.py`
 - Dual-memory context building — `conversation/context_builder.py`
