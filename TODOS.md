@@ -3,20 +3,20 @@
 ## P1 — Critical
 
 ### Unit Economics Validation
-**What:** Посчитать реальную цену kimi-k2p5 за токен, настроить cost_cents трекинг, пересмотреть прайсинг по реальным данным.
-**Why:** При оценочных ценах даже Pro тиер ($9.99) может быть убыточным (~$36 себестоимость при 100 сообщ/день). Без реальных данных невозможно установить правильные цены.
-**Context:** `usage_tracking` уже трекает `tokens_input` и `tokens_output`. Нужно добавить `cost_cents` (принято в scope CEO review) и заполнять его реальными ценами API. Затем проанализировать данные и скорректировать тиеры/лимиты.
-**Effort:** S (CC ~15 min для трекинга, затем ручной анализ данных)
-**Depends on:** cost_cents tracking (в scope текущего плана)
+**What:** Проверить реальную цену kimi-k2p5 за токен против констант COST_PER_1M_INPUT/OUTPUT в `chat_pipeline.py`. После 1 недели данных — проанализировать cost_cents и скорректировать тиеры/лимиты.
+**Why:** При оценочных ценах даже Pro тиер ($9.99) может быть убыточным. Нужны реальные данные для правильного прайсинга.
+**Context:** `cost_cents NUMERIC(10,4)` уже трекается в `usage_tracking` (миграция 008). Константы: `COST_PER_1M_INPUT=0.15`, `COST_PER_1M_OUTPUT=0.60`, `IMAGE_COST_CENTS=5.0`. После накопления данных — сравнить с реальными API счетами.
+**Effort:** S (ручной анализ данных после 1 недели)
+**Depends on:** Character MVP (завершён)
 
 ## P2 — Important
 
-### /stats Command — Usage Dashboard
-**What:** Команда /stats показывает пользователю: сообщений сегодня (15/20), план (Free), дней вместе (12).
-**Why:** Делает лимит прозрачным, мотивирует апгрейд на платный тиер. Пользователь видит ценность и понимает что получит при апгрейде.
-**Context:** Данные уже есть в `usage_tracking` и `user_subscriptions`. Нужен handler для /stats + запрос к `get_user_usage_today()` SQL функции.
-**Effort:** S (CC ~15 min)
-**Depends on:** rate limiting и usage tracking (в scope текущего плана)
+### Image Consistency Evaluation
+**What:** Оценить consistency внешности gpt-image-1 с appearance prefix после 50+ сгенерированных фото. Если <70% визуальной consistency — исследовать reference image подходы (Flux с IP-Adapter и т.д.).
+**Why:** Appearance prefix в промпте даёт ~70-80% consistency по оценкам, но это не проверено на реальных данных. Консистентная внешность — core differentiator продукта.
+**Context:** `ImageService.generate()` prepend'ит `CharacterConfig.appearance_en` к каждому промпту. Текущая строка: "Young woman, 24 years old, shoulder-length dark brown hair...". Альтернативы: Flux с reference image, DALL-E с style reference.
+**Effort:** S (ручная оценка после 50+ фото)
+**Depends on:** Character MVP (завершён)
 
 ### Relationship Levels (Gamification)
 **What:** Использовать `relationship_depth` (0-10) из `memory_models.py`. По мере общения уровень растёт → бот становится теплее, отправляет больше фото, пишет чаще первым.
