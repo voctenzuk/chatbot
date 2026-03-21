@@ -4,14 +4,18 @@ Russian-language AI companion chatbot built with **aiogram 3** (async, long-poll
 
 ## Features
 
-- Conversational AI persona with consistent personality (Russian language)
+- **Character system** — defined personality, voice style, and few-shot examples via `CharacterConfig`
+- **Consistent appearance** — image generation prepends character description for visual consistency across photos
 - **Short-term memory** — sliding window of recent messages per episode
 - **Long-term memory** — mem0 with automatic fact extraction, dedup, and conflict resolution
 - **Automatic episode management** — new episodes on 8h time gap or topic shift (cosine similarity < 0.7)
 - **Episode summarization** — running/chunk/final summaries for context compression
 - **Image generation** — LLM decides when to send photos via tool calling (OpenAI Images API)
 - **Proactive messaging** — bot initiates conversations based on context and schedule
-- **Monetization** — Telegram Stars payments, subscription tiers, usage tracking
+- **Monetization** — Telegram Stars payments, tiered subscriptions (Free/Plus), per-message cost tracking
+- **Photo paywall** — daily photo limits per tier with atomic DB-based rate limiting
+- **Onboarding** — new user detection, character greeting + free photo on first `/start`
+- **Usage dashboard** — `/stats` command shows messages, photos, plan, days together
 - **Graceful degradation** — mem0, Supabase, Redis are all optional; bot works without them
 
 ## Quick start
@@ -59,7 +63,7 @@ uv run bot                    # run the bot
 uv sync                       # install/sync dependencies
 uvx ruff format .              # format code
 uvx ruff check .               # lint
-uv run pyright                 # type check
+uvx pyright                    # type check
 uv run pytest                  # run all tests
 ```
 
@@ -74,14 +78,15 @@ src/bot/
     __main__.py          # Entry point
     app.py               # asyncio bootstrap, Dispatcher setup
     config.py            # Pydantic Settings
+    character.py         # CharacterConfig dataclass + DEFAULT_CHARACTER
     wiring.py            # Composition root: AppContext + build_app_context()
     chat_pipeline.py     # Framework-agnostic chat orchestration
-    handlers.py          # Thin aiogram handlers (receive deps via kwargs)
+    handlers.py          # Thin aiogram handlers (/start, /upgrade, /stats, chat)
     ports.py             # Protocol definitions (LLMPort, MemoryPort, MessageDeliveryPort)
-    conversation/        # Episode management, context building, summarization
+    conversation/        # Episode management, context building, system prompt
     memory/              # mem0 service, memory models, cleanup
     llm/                 # LLM service wrapper
-    media/               # Image generation, artifacts, storage
+    media/               # Image generation (with appearance prefix), artifacts, storage
     infra/               # Database client, Langfuse observability
     adapters/            # Telegram delivery, proactive scheduler
 ```
