@@ -19,8 +19,6 @@ Architecture (tool calling):
     base64 -> bytes -> bot.send_photo()
 """
 
-from __future__ import annotations
-
 import base64
 from datetime import datetime
 

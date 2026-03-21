@@ -1,7 +1,5 @@
 """Langfuse observability service for LLM tracing and cost tracking."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from langfuse import Langfuse

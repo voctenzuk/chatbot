@@ -25,8 +25,6 @@ Tuning Knobs (via CleanupConfig):
     - dry_run_default: Default dry-run mode for safety
 """
 
-from __future__ import annotations
-
 import asyncio
 import os
 from dataclasses import dataclass, field
@@ -305,9 +303,8 @@ class MemoryCleanupService:
             Tuple of (should_expire, reason)
         """
         # Check explicit expiration date
-        if memory.expiration_date:
-            if datetime.now(UTC) > memory.expiration_date:
-                return True, "Explicit expiration date reached"
+        if memory.expiration_date and datetime.now(UTC) > memory.expiration_date:
+            return True, "Explicit expiration date reached"
 
         # Check category-based TTL
         category_ttl_days = self.config.get_ttl_for_category(memory.memory_category).days

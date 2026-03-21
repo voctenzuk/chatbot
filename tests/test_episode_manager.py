@@ -8,8 +8,6 @@ Tests cover:
 - Anti-flap mechanisms
 """
 
-from __future__ import annotations
-
 import asyncio
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
@@ -317,7 +315,7 @@ class TestEpisodeSwitching:
 
         # Get the current episode and add messages to it for topic context
         _ = await mock_db_client.get_active_episode_for_user(12345)
-        for i in range(3):
+        for _i in range(3):
             await mock_db_client.add_message(
                 telegram_user_id=12345,
                 role="user",

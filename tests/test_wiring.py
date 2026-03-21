@@ -1,7 +1,5 @@
 """Tests for bot.wiring — composition root."""
 
-from __future__ import annotations
-
 import asyncio
 from unittest.mock import MagicMock, patch
 

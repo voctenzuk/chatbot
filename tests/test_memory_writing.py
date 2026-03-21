@@ -5,8 +5,6 @@ written to the memory service via a background task (_write_memory_background).
 Cognify is triggered periodically after N writes.
 """
 
-from __future__ import annotations
-
 import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch

@@ -1,7 +1,5 @@
 """LLM service for generating chat responses via LangChain."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from typing import Any
 

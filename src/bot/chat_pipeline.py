@@ -4,8 +4,6 @@ Extracts the core chat flow from handlers.py into a testable class
 with zero aiogram dependencies. Receives all services via constructor.
 """
 
-from __future__ import annotations
-
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime

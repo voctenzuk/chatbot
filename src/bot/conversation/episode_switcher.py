@@ -6,8 +6,6 @@ This module provides automatic episode switching based on:
 - Anti-flap mechanism: Prevent rapid episode switching
 """
 
-from __future__ import annotations
-
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta

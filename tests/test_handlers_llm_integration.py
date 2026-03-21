@@ -4,8 +4,6 @@ All external services are mocked: episode_manager, memory_service,
 llm_service, context_builder.
 """
 
-from __future__ import annotations
-
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4

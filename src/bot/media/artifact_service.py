@@ -7,12 +7,10 @@ This module provides the ArtifactService class for:
 - Context building support for artifact surrogates
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Self
 
 from loguru import logger
 
@@ -90,7 +88,7 @@ class Artifact:
     updated_at: datetime | None = None
 
     @classmethod
-    def from_row(cls, row: dict[str, Any]) -> Artifact:
+    def from_row(cls, row: dict[str, Any]) -> Self:
         """Create Artifact from database row."""
         return cls(
             id=str(row["id"]),
@@ -151,7 +149,7 @@ class ArtifactText:
         return None
 
     @classmethod
-    def from_row(cls, row: dict[str, Any]) -> ArtifactText:
+    def from_row(cls, row: dict[str, Any]) -> Self:
         """Create ArtifactText from database row."""
         return cls(
             id=str(row["id"]),

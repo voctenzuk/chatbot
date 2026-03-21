@@ -1,7 +1,5 @@
 """System prompt for the virtual girlfriend bot."""
 
-from __future__ import annotations
-
 import re
 
 _MAX_NAME_LENGTH = 64

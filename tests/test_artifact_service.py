@@ -1,7 +1,5 @@
 """Tests for ArtifactService and storage backend."""
 
-from __future__ import annotations
-
 import io
 from unittest.mock import AsyncMock, MagicMock
 

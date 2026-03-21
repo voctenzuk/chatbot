@@ -19,8 +19,6 @@ Architecture:
              Anti-spam → LLM generate → delivery.send_text
 """
 
-from __future__ import annotations
-
 import importlib.util
 from datetime import datetime, timedelta
 

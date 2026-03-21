@@ -4,12 +4,10 @@ This module provides a Supabase client for interacting with the database,
 including the memory system tables (threads, episodes, messages, summaries).
 """
 
-from __future__ import annotations
-
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, Protocol
+from typing import Any, Protocol, Self
 
 from loguru import logger
 
@@ -61,7 +59,7 @@ class Thread:
     updated_at: datetime | None = None
 
     @classmethod
-    def from_row(cls, row: dict[str, Any]) -> Thread:
+    def from_row(cls, row: dict[str, Any]) -> Self:
         """Create Thread from database row."""
         return cls(
             id=str(row["id"]),
@@ -93,7 +91,7 @@ class Episode:
     updated_at: datetime | None = None
 
     @classmethod
-    def from_row(cls, row: dict[str, Any]) -> Episode:
+    def from_row(cls, row: dict[str, Any]) -> Self:
         """Create Episode from database row."""
         return cls(
             id=str(row["id"]),
@@ -139,7 +137,7 @@ class EpisodeMessage:
     created_at: datetime | None = None
 
     @classmethod
-    def from_row(cls, row: dict[str, Any]) -> EpisodeMessage:
+    def from_row(cls, row: dict[str, Any]) -> Self:
         """Create EpisodeMessage from database row."""
         return cls(
             id=str(row["id"]),
@@ -167,7 +165,7 @@ class EpisodeSummary:
     created_at: datetime | None = None
 
     @classmethod
-    def from_row(cls, row: dict[str, Any]) -> EpisodeSummary:
+    def from_row(cls, row: dict[str, Any]) -> Self:
         """Create EpisodeSummary from database row."""
         return cls(
             id=str(row["id"]),

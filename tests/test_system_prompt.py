@@ -1,7 +1,5 @@
 """Tests for system prompt service."""
 
-from __future__ import annotations
-
 from bot.services.system_prompt import (
     DEFAULT_SYSTEM_PROMPT,
     _sanitize_user_name,

@@ -81,8 +81,8 @@ class TestTablesExist:
             result = await conn.fetchval(
                 """
                 SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
+                    SELECT FROM information_schema.tables
+                    WHERE table_schema = 'public'
                     AND table_name = 'threads'
                 )
                 """
@@ -95,8 +95,8 @@ class TestTablesExist:
             result = await conn.fetchval(
                 """
                 SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
+                    SELECT FROM information_schema.tables
+                    WHERE table_schema = 'public'
                     AND table_name = 'episodes'
                 )
                 """
@@ -109,8 +109,8 @@ class TestTablesExist:
             result = await conn.fetchval(
                 """
                 SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
+                    SELECT FROM information_schema.tables
+                    WHERE table_schema = 'public'
                     AND table_name = 'messages'
                 )
                 """
@@ -123,8 +123,8 @@ class TestTablesExist:
             result = await conn.fetchval(
                 """
                 SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
+                    SELECT FROM information_schema.tables
+                    WHERE table_schema = 'public'
                     AND table_name = 'episode_summaries'
                 )
                 """

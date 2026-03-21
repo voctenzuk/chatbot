@@ -1,7 +1,5 @@
 """Telegram bot handlers — thin aiogram wrappers delegating to ChatPipeline."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from aiogram import F, Router

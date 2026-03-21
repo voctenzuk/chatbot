@@ -1,7 +1,5 @@
 """Tests for ChatPipeline — framework-agnostic chat logic."""
 
-from __future__ import annotations
-
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 

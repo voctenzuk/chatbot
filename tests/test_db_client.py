@@ -4,8 +4,6 @@ These tests validate the DB client glue code against a lightweight mock
 Supabase client (rpc/table builders).
 """
 
-from __future__ import annotations
-
 from datetime import datetime
 from unittest.mock import MagicMock
 

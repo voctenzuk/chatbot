@@ -6,7 +6,7 @@ build-backend = "uv_build"
 name = "tg-virtual-girlfriend"
 version = "0.1.0"
 description = "Telegram chatbot (aiogram) with LangChain/LangGraph + cognee memory + image generation"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = [
   "aiogram>=3.4",
   "pydantic>=2.6",
@@ -44,8 +44,6 @@ dev = [
   "pytest>=8.0",
   "pytest-asyncio>=0.23",
   "pytest-cov>=5.0",
-  "ruff>=0.6",
-  "pyright>=1.1",
 ]
 
 [project.scripts]
@@ -59,7 +57,7 @@ module-name = "bot"
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+target-version = "py313"
 src = ["src"]
 
 [tool.ruff.lint]
@@ -68,7 +66,7 @@ select = [
     "E",      # pycodestyle errors
     "W",      # pycodestyle warnings
     "I",      # isort — import sorting
-    "UP",     # pyupgrade — modernize to 3.12+ syntax
+    "UP",     # pyupgrade — modernize to 3.13+ syntax
     "B",      # bugbear — common bug patterns
     "SIM",    # simplify — collapsible ifs, ternaries
     "ASYNC",  # async anti-patterns — blocking calls, missing awaits
@@ -100,7 +98,7 @@ known-first-party = ["bot"]
 docstring-code-format = true
 
 [tool.pyright]
-pythonVersion = "3.12"
+pythonVersion = "3.13"
 typeCheckingMode = "standard"
 venvPath = "."
 venv = ".venv"

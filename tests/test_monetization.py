@@ -1,7 +1,5 @@
 """Tests for monetization features: rate limiting, usage tracking, cost estimation, payments."""
 
-from __future__ import annotations
-
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4

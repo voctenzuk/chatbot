@@ -1,7 +1,5 @@
 """Delivery adapters implementing MessageDeliveryPort for different channels."""
 
-from __future__ import annotations
-
 from aiogram import Bot
 from aiogram.types import BufferedInputFile
 

@@ -8,12 +8,12 @@ Telegram AI companion chatbot: aiogram 3 (async, long-polling), LangChain for LL
 uv run bot                                    # run the bot
 uv sync                                       # install/sync dependencies
 uvx ruff check --fix . && uvx ruff format .   # lint + format
-uv run pyright                                # type check
+uvx pyright                                   # type check
 uv run pytest                                 # run all tests
 uv run pytest tests/test_foo.py::test_bar -v  # run a single test
 ```
 
-CI gate (all must pass): `ruff format --check .` → `ruff check .` → `pyright` → `pytest`
+CI gate (all must pass): `uvx ruff format --check .` → `uvx ruff check .` → `uvx pyright` → `uv run pytest`
 
 ## Architecture
 
@@ -56,7 +56,7 @@ Use `str | None` not `Optional[str]`. Never blanket `# type: ignore` — use `# 
 
 ## Code Style
 
-- Python 3.12+, type hints on public functions, 100-char lines
+- Python 3.13+, type hints on public functions, 100-char lines
 - Async-first: all service methods are `async`
 - Logging: `loguru.logger` with `{}` placeholders
 - Commits: present tense, prefixed (`feat:`, `fix:`, `chore:`)

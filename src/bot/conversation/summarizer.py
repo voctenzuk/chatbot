@@ -8,13 +8,11 @@ The service extracts facts_candidates for memory integration as specified in
 ARCHITECTURE/MEMORY_DESIGN.md.
 """
 
-from __future__ import annotations
-
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, Protocol, Self
 
 from loguru import logger
 
@@ -91,7 +89,7 @@ class FactCandidate:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> FactCandidate:
+    def from_dict(cls, data: dict[str, Any]) -> Self:
         """Create from dictionary."""
         return cls(
             text=data.get("text", ""),
@@ -115,7 +113,7 @@ class ArtifactReference:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> ArtifactReference:
+    def from_dict(cls, data: dict[str, Any]) -> Self:
         """Create from dictionary."""
         return cls(
             artifact_id=data.get("artifact_id", ""),
@@ -151,7 +149,7 @@ class SummaryJSON:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> SummaryJSON:
+    def from_dict(cls, data: dict[str, Any]) -> Self:
         """Create from dictionary."""
         facts = [
             FactCandidate.from_dict(f) if isinstance(f, dict) else FactCandidate(text=str(f))

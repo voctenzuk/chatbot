@@ -7,8 +7,6 @@ Tests cover:
 - Graceful degradation when DB is unavailable
 """
 
-from __future__ import annotations
-
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4

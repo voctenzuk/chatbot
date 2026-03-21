@@ -8,8 +8,6 @@ memory sources:
 - Pruning based on relevance, size limits, and metadata filters
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -388,7 +386,7 @@ class ContextBuilder:
             metadata={
                 "memory_count": len(top_memories),
                 "query": query,
-                "categories": list(set(m.memory_category.value for m in top_memories)),
+                "categories": list({m.memory_category.value for m in top_memories}),
             },
         )
 

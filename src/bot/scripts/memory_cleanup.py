@@ -26,8 +26,6 @@ Environment Variables:
     MEMORY_MAX_DELETIONS_PER_RUN: Safety limit on deletions (default: 1000)
 """
 
-from __future__ import annotations
-
 import argparse
 import asyncio
 import json

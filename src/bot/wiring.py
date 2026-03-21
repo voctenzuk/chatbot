@@ -5,8 +5,6 @@ graceful degradation for optional dependencies (Cognee, Supabase, OpenAI).
 AppContext groups all services so they can be passed around as a unit.
 """
 
-from __future__ import annotations
-
 import asyncio
 from dataclasses import dataclass, field
 from typing import Any

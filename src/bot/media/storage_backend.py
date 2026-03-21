@@ -4,8 +4,6 @@ This module provides an abstract interface for artifact storage,
 with implementations for local filesystem and future S3/Supabase support.
 """
 
-from __future__ import annotations
-
 import hashlib
 import shutil
 from abc import ABC, abstractmethod

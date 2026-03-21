@@ -17,8 +17,6 @@ Configuration (via environment variables or .env file):
     GRAPH_DATABASE_PROVIDER: Graph database backend (default: kuzu)
 """
 
-from __future__ import annotations
-
 import asyncio
 import hashlib
 from datetime import datetime

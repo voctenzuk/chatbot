@@ -7,8 +7,6 @@ Tests cover:
 - Synthetic dialogue scenarios
 """
 
-from __future__ import annotations
-
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
@@ -422,7 +420,7 @@ class TestSyntheticDialogues:
         ]
 
         switch_count = 0
-        for i, (content, delay_sec) in enumerate(dialogue):
+        for _i, (content, delay_sec) in enumerate(dialogue):
             ts = base_time + timedelta(seconds=delay_sec)
             msg, decision = await manager.add_message(user_id=1, content=content, timestamp=ts)
             if decision.should_switch:
