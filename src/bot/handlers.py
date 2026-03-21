@@ -7,7 +7,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import BufferedInputFile, LabeledPrice, Message, PreCheckoutQuery
 from loguru import logger
 
-from bot.chat_pipeline import _LLM_FALLBACK, ChatPipeline
+from bot.chat_pipeline import LLM_FALLBACK, ChatPipeline
 
 router = Router()
 
@@ -19,10 +19,10 @@ async def start(message: Message, pipeline: ChatPipeline) -> None:
     user_name = getattr(message.from_user, "first_name", None) if message.from_user else None
 
     try:
-        await pipeline._episode_manager.process_user_message(user_id=user_id, content="/start")
+        await pipeline.episode_manager.process_user_message(user_id=user_id, content="/start")
 
         # Provision user in DB
-        db = pipeline._db_client
+        db = pipeline.db_client
         if db is not None:
             try:
                 username = (
@@ -33,7 +33,7 @@ async def start(message: Message, pipeline: ChatPipeline) -> None:
                 logger.warning("Failed to provision user {}: {}", user_id, e)
 
         response = "Привет. Я рядом 🙂\nРасскажи, как тебя зовут?"
-        await pipeline._episode_manager.process_assistant_message(user_id=user_id, content=response)
+        await pipeline.episode_manager.process_assistant_message(user_id=user_id, content=response)
         await message.answer(response)
 
     except RuntimeError as e:
@@ -136,7 +136,7 @@ async def chat(message: Message, pipeline: ChatPipeline) -> None:
 
     except RuntimeError as e:
         logger.error("Episode manager runtime error for user {}: {}", user_id, e)
-        await message.answer(_LLM_FALLBACK)
+        await message.answer(LLM_FALLBACK)
     except Exception as e:
         logger.error("Error in chat handler for user {}: {}", user_id, e)
         await message.answer("Я тебя услышала, но что-то пошло не так. Попробуй ещё раз.")

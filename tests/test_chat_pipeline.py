@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from bot.chat_pipeline import _LLM_FALLBACK, ChatPipeline, ChatResult
+from bot.chat_pipeline import LLM_FALLBACK, ChatPipeline, ChatResult
 from bot.llm.service import LLMResponse, ToolCall
 
 
@@ -98,7 +98,7 @@ class TestChatPipeline:
         pipeline = _make_pipeline(llm=llm_svc)
         result = await pipeline.handle_message(user_id=1, content="привет")
 
-        assert result.response_text == _LLM_FALLBACK
+        assert result.response_text == LLM_FALLBACK
         assert result.llm_response is None
         assert result.was_rate_limited is False
 
@@ -106,7 +106,7 @@ class TestChatPipeline:
     async def test_handle_message_memory_search_failure_still_works(self) -> None:
         """Memory search raises -> LLM still called, response returned."""
         mock_mem = AsyncMock()
-        mock_mem.search = AsyncMock(side_effect=RuntimeError("Cognee down"))
+        mock_mem.search = AsyncMock(side_effect=RuntimeError("Memory unavailable"))
         llm_resp = _make_llm_response("Ответ без памяти")
         pipeline = _make_pipeline(llm=_make_llm_service(llm_resp), memory=mock_mem)
         result = await pipeline.handle_message(user_id=1, content="что помнишь?")
@@ -236,28 +236,17 @@ class TestFireAndForget:
             mock_logger.error.assert_not_called()
 
 
-class TestMemoryWriteCountsIsInstanceState:
-    """Verify that memory write counters are per-instance, not global."""
+class TestWriteMemoryBackground:
+    """Verify _write_memory_background calls write_factual."""
 
     @pytest.mark.asyncio
-    async def test_memory_write_counts_is_instance_state(self) -> None:
-        """Two pipelines have independent counters."""
-        mem1 = AsyncMock()
-        mem1.write_factual = AsyncMock()
-        mem1.search = AsyncMock(return_value=[])
+    async def test_write_memory_background_calls_write_factual(self) -> None:
+        """_write_memory_background delegates to write_factual with correct args."""
+        mem = AsyncMock()
+        mem.write_factual = AsyncMock()
+        mem.search = AsyncMock(return_value=[])
 
-        mem2 = AsyncMock()
-        mem2.write_factual = AsyncMock()
-        mem2.search = AsyncMock(return_value=[])
+        pipeline = _make_pipeline(memory=mem)
+        await pipeline._write_memory_background("msg1", user_id=1)
 
-        p1 = _make_pipeline(memory=mem1)
-        p2 = _make_pipeline(memory=mem2)
-
-        # Write to p1's memory background
-        await p1._write_memory_background("msg1", user_id=1)
-        assert p1._memory_write_counts.get(1, 0) == 1
-        assert p2._memory_write_counts.get(1, 0) == 0
-
-        await p2._write_memory_background("msg2", user_id=1)
-        assert p2._memory_write_counts.get(1, 0) == 1
-        assert p1._memory_write_counts.get(1, 0) == 1
+        mem.write_factual.assert_called_once_with(content="msg1", user_id=1)

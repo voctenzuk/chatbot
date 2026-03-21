@@ -2,7 +2,7 @@
 
 After LLM responds, the conversation turn (user message + bot reply) is
 written to the memory service via a background task (_write_memory_background).
-Cognify is triggered periodically after N writes.
+mem0 extracts facts automatically during write — no separate cognify step.
 """
 
 import asyncio
@@ -23,11 +23,7 @@ from bot.llm.service import LLMResponse
 
 
 async def _drain_tasks() -> None:
-    """Yield control so that pending ``asyncio.create_task`` tasks complete.
-
-    Multiple iterations handle nested tasks (e.g. ``_write_memory_background``
-    spawns ``_run_cognify_background`` via another ``create_task``).
-    """
+    """Yield control so that pending ``asyncio.create_task`` tasks complete."""
     for _ in range(5):
         await asyncio.sleep(0)
 
@@ -270,62 +266,6 @@ class TestMemoryWriting:
 
         # Bot still responded despite memory write failure
         assert msg._last_answer == "test reply"
-
-    @pytest.mark.asyncio
-    async def test_cognify_triggered_after_n_writes_on_same_pipeline(
-        self,
-        mock_episode_manager: AsyncMock,
-        mock_memory_service: AsyncMock,
-        mock_llm_service: AsyncMock,
-        mock_context_builder: MagicMock,
-    ) -> None:
-        """After N writes on the same pipeline instance, cognify() is triggered."""
-        mock_langfuse = MagicMock()
-        mock_langfuse.trace = MagicMock(return_value=nullcontext())
-
-        pipeline = ChatPipeline(
-            llm=mock_llm_service,
-            episode_manager=mock_episode_manager,
-            context_builder=mock_context_builder,
-            langfuse=mock_langfuse,
-            memory=mock_memory_service,
-        )
-
-        with patch("bot.chat_pipeline._COGNIFY_EVERY_N_WRITES", 2):
-            # First write — counter at 1 (no cognify)
-            await pipeline._write_memory_background("msg 1", user_id=42)
-            await _drain_tasks()
-            mock_memory_service.cognify.assert_not_called()
-
-            # Second write — counter reaches 2, cognify triggered
-            await pipeline._write_memory_background("msg 2", user_id=42)
-            await _drain_tasks()
-            mock_memory_service.cognify.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_cognify_not_triggered_before_n(
-        self,
-        mock_episode_manager: AsyncMock,
-        mock_memory_service: AsyncMock,
-        mock_llm_service: AsyncMock,
-        mock_context_builder: MagicMock,
-    ) -> None:
-        """Before N writes, cognify is NOT triggered."""
-        mock_langfuse = MagicMock()
-        mock_langfuse.trace = MagicMock(return_value=nullcontext())
-
-        pipeline = ChatPipeline(
-            llm=mock_llm_service,
-            episode_manager=mock_episode_manager,
-            context_builder=mock_context_builder,
-            langfuse=mock_langfuse,
-            memory=mock_memory_service,
-        )
-
-        with patch("bot.chat_pipeline._COGNIFY_EVERY_N_WRITES", 10):
-            await pipeline._write_memory_background("msg", user_id=42)
-            await _drain_tasks()
-            mock_memory_service.cognify.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_chat_no_memory_write_when_service_unavailable(

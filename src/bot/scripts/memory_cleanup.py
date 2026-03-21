@@ -40,7 +40,7 @@ sys.path.insert(0, str(src_path))
 from loguru import logger  # noqa: E402
 
 from bot.memory.cleanup import CleanupConfig, MemoryCleanupService  # noqa: E402
-from bot.memory.cognee_service import get_memory_service  # noqa: E402
+from bot.memory.mem0_service import get_memory_service  # noqa: E402
 
 
 def setup_logging(verbose: bool = False) -> None:

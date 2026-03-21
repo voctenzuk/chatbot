@@ -33,7 +33,7 @@ class TestLLMPort:
 
 
 class TestMemoryPort:
-    """Verify MemoryPort is structurally compatible with CogneeMemoryService."""
+    """Verify MemoryPort is structurally compatible with Mem0MemoryService."""
 
     @pytest.mark.asyncio
     async def test_mock_satisfies_protocol(self) -> None:

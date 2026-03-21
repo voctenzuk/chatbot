@@ -11,7 +11,7 @@ _P_CTX = "bot.conversation.context_builder.ContextBuilder"
 _P_LF = "bot.infra.langfuse_service.LangfuseService"
 _P_EM = "bot.conversation.episode_manager.EpisodeManager"
 _P_DB = "bot.infra.db_client.DatabaseClient"
-_P_MEM = "bot.memory.cognee_service.CogneeMemoryService"
+_P_MEM = "bot.memory.mem0_service.Mem0MemoryService"
 _P_IMG = "bot.media.image_service.ImageService"
 
 
@@ -29,7 +29,7 @@ def _patch_required(**overrides: MagicMock):
         _P_LF: MagicMock(),
         _P_EM: MagicMock(),
         _P_DB: RuntimeError("no db"),
-        _P_MEM: RuntimeError("no cognee"),
+        _P_MEM: RuntimeError("no mem0"),
         _P_IMG: RuntimeError("no openai"),
     }
     defaults.update(overrides)
@@ -152,7 +152,7 @@ class TestBuildAppContext:
             patch(_P_LF, return_value=mock_lf),
             patch(_P_EM, return_value=mock_em),
             patch(_P_DB, side_effect=RuntimeError("no db")),
-            patch(_P_MEM, side_effect=RuntimeError("no cognee")),
+            patch(_P_MEM, side_effect=RuntimeError("no mem0")),
             patch(_P_IMG, side_effect=RuntimeError("no openai")),
         ):
             ctx = await build_app_context()
@@ -194,7 +194,7 @@ class TestBuildAppContext:
             patch(_P_LF, return_value=MagicMock()),
             patch(_P_EM, return_value=MagicMock()),
             patch(_P_DB, side_effect=RuntimeError("no db")),
-            patch(_P_MEM, side_effect=ImportError("no cognee")),
+            patch(_P_MEM, side_effect=ImportError("no mem0")),
             patch(_P_IMG, side_effect=RuntimeError("no openai")),
         ):
             ctx = await build_app_context()
@@ -208,7 +208,7 @@ class TestBuildAppContext:
             patch(_P_LF, return_value=MagicMock()),
             patch(_P_EM, mock_em_cls),
             patch(_P_DB, side_effect=RuntimeError("no supabase")),
-            patch(_P_MEM, side_effect=RuntimeError("no cognee")),
+            patch(_P_MEM, side_effect=RuntimeError("no mem0")),
             patch(_P_IMG, side_effect=RuntimeError("no openai")),
         ):
             ctx = await build_app_context()
@@ -222,7 +222,7 @@ class TestBuildAppContext:
             patch(_P_LF, return_value=MagicMock()),
             patch(_P_EM, return_value=MagicMock()),
             patch(_P_DB, side_effect=RuntimeError("no db")),
-            patch(_P_MEM, side_effect=RuntimeError("no cognee")),
+            patch(_P_MEM, side_effect=RuntimeError("no mem0")),
             patch(_P_IMG, side_effect=ImportError("no openai")),
         ):
             ctx = await build_app_context()
@@ -235,7 +235,7 @@ class TestBuildAppContext:
             patch(_P_LF, side_effect=RuntimeError("no langfuse")),
             patch(_P_EM, return_value=MagicMock()),
             patch(_P_DB, side_effect=RuntimeError("no db")),
-            patch(_P_MEM, side_effect=RuntimeError("no cognee")),
+            patch(_P_MEM, side_effect=RuntimeError("no mem0")),
             patch(_P_IMG, side_effect=RuntimeError("no openai")),
         ):
             ctx = await build_app_context()
@@ -253,7 +253,7 @@ class TestBuildAppContext:
             patch(_P_LF, return_value=MagicMock()),
             patch(_P_EM, mock_em_cls),
             patch(_P_DB, return_value=mock_db),
-            patch(_P_MEM, side_effect=RuntimeError("no cognee")),
+            patch(_P_MEM, side_effect=RuntimeError("no mem0")),
             patch(_P_IMG, side_effect=RuntimeError("no openai")),
         ):
             await build_app_context()

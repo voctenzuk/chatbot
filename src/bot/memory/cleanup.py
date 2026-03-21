@@ -34,7 +34,6 @@ from typing import Any, Protocol
 
 from loguru import logger
 
-from bot.memory.cognee_service import CogneeMemoryService
 from bot.memory.models import MemoryCategory, MemoryFact, MemoryType
 
 
@@ -238,13 +237,13 @@ class MemoryCleanupService:
 
     def __init__(
         self,
-        memory_service: CogneeMemoryService | MemoryServiceProtocol | None = None,
+        memory_service: MemoryServiceProtocol | None = None,
         config: CleanupConfig | None = None,
     ) -> None:
         """Initialize the cleanup service.
 
         Args:
-            memory_service: CogneeMemoryService instance or compatible protocol
+            memory_service: Memory service instance satisfying MemoryServiceProtocol
             config: CleanupConfig with tuning parameters (uses defaults if None)
         """
         self.memory_service = memory_service
@@ -434,12 +433,12 @@ class MemoryCleanupService:
 
             # Apply deletions if not dry run
             if not dry_run and to_delete:
-                # Cognee does not support per-memory deletion yet.
+                # Per-memory deletion is not yet implemented in the backend.
                 # Log the IDs that would be deleted for future implementation.
                 capped = to_delete[: self.config.max_deletions_per_run]
                 logger.warning(
                     "Deletion requested for {} memories for user {} but per-memory "
-                    "deletion is not yet implemented in Cognee backend",
+                    "deletion is not yet implemented in memory backend",
                     len(capped),
                     user_id,
                 )
@@ -477,8 +476,8 @@ class MemoryCleanupService:
             dry_run = self.config.dry_run_default
 
         # For now, we require explicit user_ids since we don't have a way
-        # to list all users from cognee. In production, this might come from
-        # a users table or other source.
+        # to enumerate all users from the memory backend. In production, this
+        # might come from a users table or other source.
         if not user_ids:
             logger.warning("No user_ids provided for cleanup_all")
             return CleanupReport(
@@ -544,12 +543,12 @@ _cleanup_service: MemoryCleanupService | None = None
 
 
 def get_cleanup_service(
-    memory_service: CogneeMemoryService | None = None,
+    memory_service: MemoryServiceProtocol | None = None,
 ) -> MemoryCleanupService:
     """Get or create global cleanup service instance.
 
     Args:
-        memory_service: Optional CogneeMemoryService to use
+        memory_service: Optional memory service satisfying MemoryServiceProtocol
 
     Returns:
         MemoryCleanupService instance

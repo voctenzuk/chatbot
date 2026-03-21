@@ -1,7 +1,7 @@
 """Composition root — single place to create and wire all services.
 
 build_app_context() creates every service once at startup, handling
-graceful degradation for optional dependencies (Cognee, Supabase, OpenAI).
+graceful degradation for optional dependencies (mem0, Supabase, OpenAI).
 AppContext groups all services so they can be passed around as a unit.
 """
 
@@ -25,7 +25,7 @@ class AppContext:
     episode_manager: Any  # EpisodeManager
     context_builder: Any  # ContextBuilder
     langfuse: Any  # LangfuseService
-    memory: Any | None = None  # CogneeMemoryService
+    memory: Any | None = None  # Mem0MemoryService
     image_service: Any | None = None  # ImageService
     db_client: Any | None = None  # DatabaseClient
     scheduler: Any | None = None  # ProactiveScheduler
@@ -69,7 +69,7 @@ class AppContext:
 async def build_app_context() -> AppContext:
     """Create all services with graceful degradation for optional ones.
 
-    Services that fail to initialize (Cognee, Supabase, OpenAI Images)
+    Services that fail to initialize (mem0, Supabase, OpenAI Images)
     are set to None. Required services (LLM, ContextBuilder, Langfuse,
     EpisodeManager) are always created.
 
@@ -107,12 +107,12 @@ async def build_app_context() -> AppContext:
 
     memory = None
     try:
-        from bot.memory.cognee_service import CogneeMemoryService
+        from bot.memory.mem0_service import Mem0MemoryService
 
-        memory = CogneeMemoryService()
-        logger.info("CogneeMemoryService created")
+        memory = Mem0MemoryService()
+        logger.info("Mem0MemoryService created")
     except Exception as exc:
-        logger.info("CogneeMemoryService unavailable ({}), running without memory", exc)
+        logger.info("Mem0MemoryService unavailable ({}), running without memory", exc)
 
     image_service = None
     try:

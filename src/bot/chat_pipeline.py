@@ -6,7 +6,7 @@ with zero aiogram dependencies. Receives all services via constructor.
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from loguru import logger
@@ -19,16 +19,15 @@ from bot.conversation.context_builder import (
 from bot.conversation.episode_manager import EpisodeManager, EpisodeMessage
 from bot.conversation.system_prompt import get_system_prompt
 from bot.llm.service import LLMResponse, LLMService, ToolCall
+from bot.media.image_service import SEND_PHOTO_TOOL
 
-_LLM_FALLBACK = "Прости, у меня сейчас не получается ответить. Попробуй ещё раз чуть позже."
+LLM_FALLBACK = "Прости, у меня сейчас не получается ответить. Попробуй ещё раз чуть позже."
 
 _ROLE_MAP = {
     "user": MessageRole.USER,
     "assistant": MessageRole.ASSISTANT,
     "system": MessageRole.SYSTEM,
 }
-
-_COGNIFY_EVERY_N_WRITES: int = 10
 
 
 @dataclass
@@ -59,14 +58,13 @@ class ChatPipeline:
         db_client: Any | None = None,
     ) -> None:
         self._llm = llm
-        self._episode_manager = episode_manager
+        self.episode_manager = episode_manager
         self._context_builder = context_builder
         self._langfuse = langfuse
         self._memory = memory
         self._image_service = image_service
-        self._db_client = db_client
+        self.db_client = db_client
         self._background_tasks: set[asyncio.Task[Any]] = set()
-        self._memory_write_counts: dict[int, int] = {}
 
     def _fire_and_forget(self, coro: Any) -> None:
         """Schedule a coroutine as a background task with reference tracking."""
@@ -99,7 +97,7 @@ class ChatPipeline:
         6. Write to long-term memory (fire-and-forget)
         """
         # 1. Persist user message
-        result = await self._episode_manager.process_user_message(user_id=user_id, content=content)
+        result = await self.episode_manager.process_user_message(user_id=user_id, content=content)
         logger.debug(
             "User {} message persisted to episode {} (new_episode: {}, reason: {})",
             user_id,
@@ -109,9 +107,9 @@ class ChatPipeline:
         )
 
         # 2. Check rate limit (fail open on errors)
-        if self._db_client is not None:
+        if self.db_client is not None:
             try:
-                allowed = await self._db_client.check_rate_limit(user_id)
+                allowed = await self.db_client.check_rate_limit(user_id)
                 if not allowed:
                     return ChatResult(
                         response_text=(
@@ -135,7 +133,7 @@ class ChatPipeline:
             response = llm_response.content
         except Exception as llm_exc:
             logger.error("LLM generation failed for user {}: {}", user_id, llm_exc)
-            response = _LLM_FALLBACK
+            response = LLM_FALLBACK
             llm_response = None
 
         # 4. Retrieve cached image from tool loop (already generated in _execute_tool_for_loop)
@@ -148,7 +146,7 @@ class ChatPipeline:
 
         # 5. Persist assistant response + track usage
         if llm_response is not None:
-            await self._episode_manager.process_assistant_message(
+            await self.episode_manager.process_assistant_message(
                 user_id=user_id,
                 content=response,
                 tokens_in=llm_response.tokens_in,
@@ -156,14 +154,14 @@ class ChatPipeline:
                 model=llm_response.model,
             )
         else:
-            await self._episode_manager.process_assistant_message(
+            await self.episode_manager.process_assistant_message(
                 user_id=user_id,
                 content=response,
             )
 
-        if self._db_client is not None and llm_response is not None:
+        if self.db_client is not None and llm_response is not None:
             try:
-                await self._db_client.increment_usage(
+                await self.db_client.increment_usage(
                     user_id,
                     msg_count=1,
                     tokens_in=llm_response.tokens_in,
@@ -201,7 +199,7 @@ class ChatPipeline:
         if generated_images is None:
             generated_images = {}
 
-        episode = await self._episode_manager.get_current_episode(user_id)
+        episode = await self.episode_manager.get_current_episode(user_id)
 
         with self._langfuse.trace(
             user_id=user_id,
@@ -221,7 +219,7 @@ class ChatPipeline:
                     logger.warning("Memory search failed for user {}: {}", user_id, exc)
 
             # Fetch recent episode messages and convert
-            recent_episode_msgs = await self._episode_manager.get_recent_messages(user_id, limit=20)
+            recent_episode_msgs = await self.episode_manager.get_recent_messages(user_id, limit=20)
             recent_messages = _episode_messages_to_conversation(recent_episode_msgs)
 
             # Assemble LLM messages via context builder
@@ -236,8 +234,6 @@ class ChatPipeline:
             # First LLM call (with image tool if available)
             tools = None
             if self._image_service is not None:
-                from bot.media.image_service import SEND_PHOTO_TOOL
-
                 tools = [SEND_PHOTO_TOOL]
 
             llm_response = await self._llm.generate(llm_messages, tools=tools)
@@ -309,22 +305,8 @@ class ChatPipeline:
             return
         try:
             await self._memory.write_factual(content=memory_content, user_id=user_id)
-
-            self._memory_write_counts[user_id] = self._memory_write_counts.get(user_id, 0) + 1
-            if self._memory_write_counts[user_id] >= _COGNIFY_EVERY_N_WRITES:
-                self._memory_write_counts[user_id] = 0
-                self._fire_and_forget(self._run_cognify_background())
         except Exception as exc:
             logger.warning("Background memory write failed for user {}: {}", user_id, exc)
-
-    async def _run_cognify_background(self) -> None:
-        """Run cognify in background to build knowledge graph."""
-        try:
-            if self._memory is not None:
-                await self._memory.cognify()
-                logger.info("Background cognify completed successfully")
-        except Exception as exc:
-            logger.warning("Background cognify failed: {}", exc)
 
 
 def _episode_messages_to_conversation(
@@ -335,7 +317,7 @@ def _episode_messages_to_conversation(
         ConversationMessage(
             role=_ROLE_MAP.get(msg.role, MessageRole.USER),
             content=msg.content_text,
-            timestamp=msg.created_at or datetime.now(),
+            timestamp=msg.created_at or datetime.now(tz=UTC),
         )
         for msg in messages
     ]
