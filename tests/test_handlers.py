@@ -14,8 +14,10 @@ from uuid import uuid4
 import pytest
 from aiogram.types import Chat, Message, User
 
+from bot.character import DEFAULT_CHARACTER
 from bot.chat_pipeline import ChatPipeline, ChatResult
-from bot.handlers import _extract_message_content, chat, start
+from bot.handlers import _extract_message_content, chat, start, stats
+from bot.infra.db_client import ProvisionResult, UserUsage
 
 
 class MockMessage:
@@ -58,10 +60,16 @@ class MockMessage:
         self.location = None
         self.contact = None
         self._last_answer: str | None = None
+        self._last_photo: Any = None
 
     async def answer(self, text: str, **kwargs: Any) -> MagicMock:
         """Mock answer method."""
         self._last_answer = text
+        return MagicMock()
+
+    async def answer_photo(self, photo: Any, **kwargs: Any) -> MagicMock:
+        """Mock answer_photo method."""
+        self._last_photo = photo
         return MagicMock()
 
 
@@ -231,6 +239,96 @@ class TestChatHandler:
 
         assert message._last_answer is not None
         assert "услышала" in message._last_answer
+
+
+class TestStartOnboarding:
+    """Tests for /start handler with new onboarding flow."""
+
+    @pytest.mark.asyncio
+    async def test_start_new_user_sends_greeting_and_prompt(self, mock_pipeline: MagicMock) -> None:
+        """New user (is_new=True, character set) -> sends greeting + 'Расскажи'."""
+        mock_db = AsyncMock()
+        mock_db.provision_user = AsyncMock(return_value=ProvisionResult(user_id=12345, is_new=True))
+        mock_pipeline.db_client = mock_db
+        mock_pipeline._character = DEFAULT_CHARACTER
+        mock_pipeline._image_service = None  # no image service for simplicity
+
+        message = MockMessage(text="/start", user_id=12345)
+        await start(message, pipeline=mock_pipeline)  # type: ignore[arg-type]
+
+        # Should have sent greeting and then "Расскажи" prompt
+        assert message._last_answer is not None
+        assert "Расскажи" in message._last_answer
+
+    @pytest.mark.asyncio
+    async def test_start_returning_user_sends_welcome_back(self, mock_pipeline: MagicMock) -> None:
+        """Returning user (is_new=False) -> sends welcome back message."""
+        mock_db = AsyncMock()
+        mock_db.provision_user = AsyncMock(
+            return_value=ProvisionResult(user_id=12345, is_new=False)
+        )
+        mock_pipeline.db_client = mock_db
+        mock_pipeline._character = DEFAULT_CHARACTER
+
+        message = MockMessage(text="/start", user_id=12345)
+        await start(message, pipeline=mock_pipeline)  # type: ignore[arg-type]
+
+        assert message._last_answer is not None
+        assert "С возвращением" in message._last_answer
+
+
+class TestStatsHandler:
+    """Tests for /stats command handler."""
+
+    @pytest.mark.asyncio
+    async def test_stats_happy_path(self, mock_pipeline: MagicMock) -> None:
+        """Stats with usage data -> formats correctly."""
+        mock_db = AsyncMock()
+        mock_db.get_user_usage_today = AsyncMock(
+            return_value=UserUsage(
+                messages_sent=10,
+                photo_count=2,
+                daily_limit=50,
+                photo_limit=5,
+                plan_slug="plus",
+                total_cost=1.5,
+                days_together=7,
+            )
+        )
+        mock_pipeline.db_client = mock_db
+
+        message = MockMessage(text="/stats", user_id=12345)
+        await stats(message, pipeline=mock_pipeline)  # type: ignore[arg-type]
+
+        assert message._last_answer is not None
+        assert "10" in message._last_answer  # messages_sent
+        assert "50" in message._last_answer  # daily_limit
+        assert "Plus" in message._last_answer  # plan name
+        assert "7" in message._last_answer  # days_together
+
+    @pytest.mark.asyncio
+    async def test_stats_no_db(self, mock_pipeline: MagicMock) -> None:
+        """Stats with no DB -> returns unavailable message."""
+        mock_pipeline.db_client = None
+
+        message = MockMessage(text="/stats", user_id=12345)
+        await stats(message, pipeline=mock_pipeline)  # type: ignore[arg-type]
+
+        assert message._last_answer is not None
+        assert "Статистика временно недоступна" in message._last_answer
+
+    @pytest.mark.asyncio
+    async def test_stats_empty_usage(self, mock_pipeline: MagicMock) -> None:
+        """Stats with empty usage -> returns 'Статистика пока пуста'."""
+        mock_db = AsyncMock()
+        mock_db.get_user_usage_today = AsyncMock(return_value=None)
+        mock_pipeline.db_client = mock_db
+
+        message = MockMessage(text="/stats", user_id=12345)
+        await stats(message, pipeline=mock_pipeline)  # type: ignore[arg-type]
+
+        assert message._last_answer is not None
+        assert "Статистика пока пуста" in message._last_answer
 
 
 class TestExtractMessageContent:

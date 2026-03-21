@@ -6,7 +6,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from bot.chat_pipeline import LLM_FALLBACK, ChatPipeline, ChatResult
+from bot.chat_pipeline import (
+    COST_PER_1M_INPUT,
+    COST_PER_1M_OUTPUT,
+    IMAGE_COST_CENTS,
+    LLM_FALLBACK,
+    ChatPipeline,
+    ChatResult,
+)
 from bot.llm.service import LLMResponse, ToolCall
 
 
@@ -139,7 +146,12 @@ class TestChatPipeline:
         mock_img = AsyncMock()
         mock_img.generate = AsyncMock(return_value=fake_image)
 
-        pipeline = _make_pipeline(llm=llm_svc, image_service=mock_img)
+        mock_db = AsyncMock()
+        mock_db.check_rate_limit = AsyncMock(return_value=True)
+        mock_db.try_consume_photo = AsyncMock(return_value=True)
+        mock_db.increment_usage = AsyncMock()
+
+        pipeline = _make_pipeline(llm=llm_svc, image_service=mock_img, db_client=mock_db)
 
         with patch(
             "bot.chat_pipeline.SEND_PHOTO_TOOL",
@@ -196,6 +208,133 @@ class TestChatPipeline:
             tokens_out=15,
             model="test-model",
         )
+
+
+class TestCostTrackingAndPhotoRateLimit:
+    """Tests for cost tracking via increment_usage and photo rate limiting."""
+
+    @pytest.mark.asyncio
+    async def test_cost_cents_calculated_and_passed_to_increment_usage(self) -> None:
+        """cost_cents is calculated from tokens and passed to db_client.increment_usage."""
+        llm_resp = LLMResponse(content="Ответ", model="test", tokens_in=1000, tokens_out=500)
+        mock_db = AsyncMock()
+        mock_db.check_rate_limit = AsyncMock(return_value=True)
+        mock_db.increment_usage = AsyncMock()
+
+        pipeline = _make_pipeline(llm=_make_llm_service(llm_resp), db_client=mock_db)
+        await pipeline.handle_message(user_id=1, content="привет")
+
+        mock_db.increment_usage.assert_called_once()
+        call_kwargs = mock_db.increment_usage.call_args
+        cost_cents = call_kwargs.kwargs.get("cost_cents") or call_kwargs[1].get("cost_cents")
+        if cost_cents is None:
+            # Positional args: (user_id, msg_count=, tokens_in=, tokens_out=, cost_cents=)
+            cost_cents = call_kwargs[0][4] if len(call_kwargs[0]) > 4 else None
+        assert cost_cents is not None
+        expected = (1000 * COST_PER_1M_INPUT + 500 * COST_PER_1M_OUTPUT) / 1_000_000
+        assert abs(cost_cents - expected) < 1e-12
+
+    @pytest.mark.asyncio
+    async def test_cost_cents_includes_image_cost_when_image_generated(self) -> None:
+        """cost_cents adds IMAGE_COST_CENTS when an image is generated."""
+        tool_calls = [ToolCall(name="send_photo", args={"prompt": "cat"}, id="tc-1")]
+        first_resp = _make_llm_response("", tool_calls=tool_calls)
+        final_resp = _make_llm_response("Вот картинка!")
+
+        llm_svc = AsyncMock()
+        llm_svc.generate = AsyncMock(side_effect=[first_resp, final_resp])
+
+        fake_image = b"\x89PNG_fake"
+        mock_img = AsyncMock()
+        mock_img.generate = AsyncMock(return_value=fake_image)
+
+        mock_db = AsyncMock()
+        mock_db.check_rate_limit = AsyncMock(return_value=True)
+        mock_db.try_consume_photo = AsyncMock(return_value=True)
+        mock_db.increment_usage = AsyncMock()
+
+        pipeline = _make_pipeline(llm=llm_svc, image_service=mock_img, db_client=mock_db)
+        result = await pipeline.handle_message(user_id=1, content="нарисуй кота")
+
+        assert result.image_bytes is not None
+        mock_db.increment_usage.assert_called_once()
+        call_kwargs = mock_db.increment_usage.call_args
+        cost_cents = call_kwargs.kwargs.get("cost_cents") or call_kwargs[1].get("cost_cents")
+        if cost_cents is None:
+            cost_cents = call_kwargs[0][4] if len(call_kwargs[0]) > 4 else None
+        assert cost_cents is not None
+        assert cost_cents >= IMAGE_COST_CENTS
+
+    @pytest.mark.asyncio
+    async def test_photo_rate_limit_returns_limit_message(self) -> None:
+        """try_consume_photo returns False -> tool returns rate limit message."""
+        tool_calls = [ToolCall(name="send_photo", args={"prompt": "cat"}, id="tc-1")]
+        first_resp = _make_llm_response("", tool_calls=tool_calls)
+        final_resp = _make_llm_response("Не получилось.")
+
+        llm_svc = AsyncMock()
+        llm_svc.generate = AsyncMock(side_effect=[first_resp, final_resp])
+
+        mock_img = AsyncMock()
+        mock_img.generate = AsyncMock(return_value=b"should_not_be_called")
+
+        mock_db = AsyncMock()
+        mock_db.check_rate_limit = AsyncMock(return_value=True)
+        mock_db.try_consume_photo = AsyncMock(return_value=False)
+        mock_db.increment_usage = AsyncMock()
+
+        pipeline = _make_pipeline(llm=llm_svc, image_service=mock_img, db_client=mock_db)
+        result = await pipeline.handle_message(user_id=1, content="фото")
+
+        # Image should NOT have been generated
+        mock_img.generate.assert_not_called()
+        # No image bytes delivered
+        assert result.image_bytes is None
+
+    @pytest.mark.asyncio
+    async def test_photo_no_db_returns_unavailable(self) -> None:
+        """db_client is None -> tool returns 'Image service unavailable'."""
+        tool_calls = [ToolCall(name="send_photo", args={"prompt": "cat"}, id="tc-1")]
+        first_resp = _make_llm_response("", tool_calls=tool_calls)
+        final_resp = _make_llm_response("Сервис недоступен.")
+
+        llm_svc = AsyncMock()
+        llm_svc.generate = AsyncMock(side_effect=[first_resp, final_resp])
+
+        mock_img = AsyncMock()
+        mock_img.generate = AsyncMock(return_value=b"nope")
+
+        # No db_client at all
+        pipeline = _make_pipeline(llm=llm_svc, image_service=mock_img, db_client=None)
+        result = await pipeline.handle_message(user_id=1, content="фото")
+
+        mock_img.generate.assert_not_called()
+        assert result.image_bytes is None
+
+    @pytest.mark.asyncio
+    async def test_photo_rate_limit_true_generates_normally(self) -> None:
+        """try_consume_photo returns True -> photo generated and returned normally."""
+        tool_calls = [ToolCall(name="send_photo", args={"prompt": "selfie"}, id="tc-1")]
+        first_resp = _make_llm_response("", tool_calls=tool_calls)
+        final_resp = _make_llm_response("Вот!")
+
+        llm_svc = AsyncMock()
+        llm_svc.generate = AsyncMock(side_effect=[first_resp, final_resp])
+
+        fake_image = b"\x89PNG_data"
+        mock_img = AsyncMock()
+        mock_img.generate = AsyncMock(return_value=fake_image)
+
+        mock_db = AsyncMock()
+        mock_db.check_rate_limit = AsyncMock(return_value=True)
+        mock_db.try_consume_photo = AsyncMock(return_value=True)
+        mock_db.increment_usage = AsyncMock()
+
+        pipeline = _make_pipeline(llm=llm_svc, image_service=mock_img, db_client=mock_db)
+        result = await pipeline.handle_message(user_id=1, content="селфи")
+
+        mock_img.generate.assert_called_once()
+        assert result.image_bytes == fake_image
 
 
 class TestFireAndForget:

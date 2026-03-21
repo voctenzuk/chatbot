@@ -56,6 +56,7 @@ class TestImageServiceGenerate:
         svc._client = mock_openai_client
         svc._model = "gpt-image-1"
         svc._send_counts: dict[int, dict[str, int]] = {}
+        svc._character = None
         return svc
 
     @pytest.mark.asyncio
@@ -66,11 +67,20 @@ class TestImageServiceGenerate:
         mock_openai_client.images.generate.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_generate_rate_limited(self, service: Any) -> None:
+    async def test_generate_proceeds_regardless_of_send_counts(
+        self, service: Any, mock_openai_client: AsyncMock
+    ) -> None:
+        """ImageService.generate() does not enforce rate limits itself.
+
+        Rate limiting is now handled at the pipeline level via
+        db_client.try_consume_photo(). The service always attempts generation
+        when available and prompt is non-empty.
+        """
         today = datetime.now(tz=UTC).strftime("%Y-%m-%d")
         service._send_counts[123] = {today: 5}
         result = await service.generate("test", user_id=123)
-        assert result is None
+        # generate() proceeds; rate-limit enforcement is in ChatPipeline
+        assert result is not None
 
     @pytest.mark.asyncio
     async def test_generate_empty_prompt(self, service: Any) -> None:
@@ -92,6 +102,7 @@ class TestImageServiceGenerate:
         svc = ImageService.__new__(ImageService)
         svc._client = None
         svc._send_counts: dict[int, dict[str, int]] = {}
+        svc._character = None
         result = await svc.generate("test", user_id=123)
         assert result is None
 
@@ -117,6 +128,87 @@ def _make_message_result(episode_id: str | None = None) -> MagicMock:
     result.is_new_episode = False
     result.switch_decision = mock_decision
     return result
+
+
+class TestImageServiceAppearancePrefix:
+    """Tests for character appearance_en prefix in image generation."""
+
+    @pytest.fixture
+    def mock_openai_client(self) -> AsyncMock:
+        client = AsyncMock()
+        mock_response = MagicMock()
+        mock_image_data = MagicMock()
+        mock_image_data.b64_json = base64.b64encode(b"fake_png_data").decode()
+        mock_response.data = [mock_image_data]
+        client.images.generate = AsyncMock(return_value=mock_response)
+        return client
+
+    @pytest.mark.asyncio
+    async def test_generate_prepends_appearance_when_character_set(
+        self, mock_openai_client: AsyncMock
+    ) -> None:
+        """generate() prepends character.appearance_en to prompt."""
+        from bot.character import CharacterConfig
+        from bot.media.image_service import ImageService
+
+        char = CharacterConfig(
+            name="Тест",
+            personality="п",
+            appearance_en="Red hair, green eyes",
+            voice_style="с",
+            greeting="г",
+            example_messages=["м"],
+        )
+        svc = ImageService.__new__(ImageService)
+        svc._client = mock_openai_client
+        svc._model = "gpt-image-1"
+        svc._character = char
+
+        await svc.generate("sitting in a cafe", user_id=1)
+
+        call_kwargs = mock_openai_client.images.generate.call_args
+        prompt_used = call_kwargs.kwargs.get("prompt") or call_kwargs[1].get("prompt")
+        assert prompt_used is not None
+        assert prompt_used.startswith("Red hair, green eyes")
+        assert "sitting in a cafe" in prompt_used
+
+    @pytest.mark.asyncio
+    async def test_generate_passes_prompt_unchanged_when_no_character(
+        self, mock_openai_client: AsyncMock
+    ) -> None:
+        """generate() passes prompt unchanged when character is None."""
+        from bot.media.image_service import ImageService
+
+        svc = ImageService.__new__(ImageService)
+        svc._client = mock_openai_client
+        svc._model = "gpt-image-1"
+        svc._character = None
+
+        await svc.generate("cute cat", user_id=1)
+
+        call_kwargs = mock_openai_client.images.generate.call_args
+        prompt_used = call_kwargs.kwargs.get("prompt") or call_kwargs[1].get("prompt")
+        assert prompt_used == "cute cat"
+
+    def test_image_service_constructor_accepts_character(self) -> None:
+        """ImageService constructor accepts character parameter without error."""
+        from bot.character import CharacterConfig
+        from bot.media.image_service import ImageService
+
+        char = CharacterConfig(
+            name="Тест",
+            personality="п",
+            appearance_en="Blue eyes",
+            voice_style="с",
+            greeting="г",
+            example_messages=["м"],
+        )
+        # Constructor runs but client will be None due to missing API key
+        svc = ImageService.__new__(ImageService)
+        svc._client = None
+        svc._model = "gpt-image-1"
+        svc._character = char
+        assert svc._character is char
 
 
 class TestHandlerToolCallIntegration:
@@ -174,6 +266,11 @@ class TestHandlerToolCallIntegration:
         mock_langfuse = MagicMock()
         mock_langfuse.trace = MagicMock(return_value=nullcontext())
 
+        mock_db = AsyncMock()
+        mock_db.check_rate_limit = AsyncMock(return_value=True)
+        mock_db.try_consume_photo = AsyncMock(return_value=True)
+        mock_db.increment_usage = AsyncMock()
+
         with (
             patch("bot.chat_pipeline.get_system_prompt", return_value="sys"),
             patch(
@@ -187,6 +284,7 @@ class TestHandlerToolCallIntegration:
                 context_builder=mock_context_builder,
                 langfuse=mock_langfuse,
                 image_service=mock_image_svc,
+                db_client=mock_db,
             )
 
             from bot.handlers import chat

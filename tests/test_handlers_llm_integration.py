@@ -358,6 +358,9 @@ class TestToolExecutionLoop:
         mock_img = AsyncMock()
         mock_img.generate = AsyncMock(return_value=b"img")
 
+        mock_db = AsyncMock()
+        mock_db.try_consume_photo = AsyncMock(return_value=True)
+
         with (
             patch(
                 "bot.media.image_service.SEND_PHOTO_TOOL",
@@ -375,6 +378,7 @@ class TestToolExecutionLoop:
                 langfuse=mock_langfuse_service,
                 memory=mock_memory_service,
                 image_service=mock_img,
+                db_client=mock_db,
             )
             await p._generate_llm_response(
                 user_id=99,
@@ -453,4 +457,8 @@ class TestStartHandlerUnchanged:
         await start(msg, pipeline=mock_pipeline)  # type: ignore[arg-type]
 
         assert msg._last_answer is not None
-        assert "рядом" in msg._last_answer or "Привет" in msg._last_answer
+        assert (
+            "рядом" in msg._last_answer
+            or "Привет" in msg._last_answer
+            or "возвращением" in msg._last_answer
+        )

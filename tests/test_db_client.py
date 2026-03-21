@@ -9,7 +9,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from bot.infra.db_client import DatabaseClient, Episode, EpisodeMessage, EpisodeSummary, Thread
+from bot.infra.db_client import (
+    DatabaseClient,
+    Episode,
+    EpisodeMessage,
+    EpisodeSummary,
+    ProvisionResult,
+    Thread,
+    UserUsage,
+)
 
 
 @pytest.fixture
@@ -329,3 +337,74 @@ async def test_normalize_message_row_unit():
     msg = EpisodeMessage.from_row(normalized)
     assert msg.id == "msg_abc123"
     assert msg.episode_id == "ep_xyz789"
+
+
+@pytest.mark.asyncio
+async def test_provision_user_returns_provision_result_new():
+    """provision_user returns ProvisionResult with is_new=True for new user."""
+    mock_client = MagicMock()
+    rpc_result = MagicMock()
+    rpc_result.execute = MagicMock(return_value=MagicMock(data=[{"user_id": 123, "is_new": True}]))
+    mock_client.rpc = MagicMock(return_value=rpc_result)
+
+    db = DatabaseClient(client=mock_client)
+    result = await db.provision_user(123, username="test_user", first_name="Test")
+
+    assert result is not None
+    assert isinstance(result, ProvisionResult)
+    assert result.is_new is True
+    assert result.user_id == 123
+
+
+@pytest.mark.asyncio
+async def test_try_consume_photo_returns_bool():
+    """try_consume_photo returns bool from RPC response."""
+    mock_client = MagicMock()
+    rpc_result = MagicMock()
+    rpc_result.execute = MagicMock(return_value=MagicMock(data=True))
+    mock_client.rpc = MagicMock(return_value=rpc_result)
+
+    db = DatabaseClient(client=mock_client)
+    result = await db.try_consume_photo(123)
+
+    assert result is True
+    mock_client.rpc.assert_called_once_with(
+        "try_consume_photo",
+        {"p_user_id": 123},
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_user_usage_today_returns_user_usage():
+    """get_user_usage_today returns UserUsage from RPC response."""
+    mock_client = MagicMock()
+    rpc_result = MagicMock()
+    rpc_result.execute = MagicMock(
+        return_value=MagicMock(
+            data=[
+                {
+                    "messages_sent": 15,
+                    "photo_count": 3,
+                    "daily_limit": 50,
+                    "photo_limit": 10,
+                    "plan_slug": "plus",
+                    "total_cost": 2.5,
+                    "days_together": 14,
+                }
+            ]
+        )
+    )
+    mock_client.rpc = MagicMock(return_value=rpc_result)
+
+    db = DatabaseClient(client=mock_client)
+    usage = await db.get_user_usage_today(123)
+
+    assert usage is not None
+    assert isinstance(usage, UserUsage)
+    assert usage.messages_sent == 15
+    assert usage.photo_count == 3
+    assert usage.daily_limit == 50
+    assert usage.photo_limit == 10
+    assert usage.plan_slug == "plus"
+    assert usage.total_cost == 2.5
+    assert usage.days_together == 14
