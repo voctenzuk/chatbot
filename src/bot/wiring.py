@@ -29,6 +29,7 @@ class AppContext:
     image_service: Any | None = None  # ImageService
     db_client: Any | None = None  # DatabaseClient
     scheduler: Any | None = None  # ProactiveScheduler
+    character: Any | None = None  # CharacterConfig
     pipeline: Any | None = None  # ChatPipeline (set after construction)
     _background_tasks: set[asyncio.Task[Any]] = field(default_factory=set, repr=False)
 
@@ -114,11 +115,13 @@ async def build_app_context() -> AppContext:
     except Exception as exc:
         logger.info("Mem0MemoryService unavailable ({}), running without memory", exc)
 
+    from bot.character import DEFAULT_CHARACTER
+
     image_service = None
     try:
         from bot.media.image_service import ImageService
 
-        image_service = ImageService()
+        image_service = ImageService(character=DEFAULT_CHARACTER)
         logger.info("ImageService created")
     except Exception as exc:
         logger.info("ImageService unavailable ({}), running without image generation", exc)
@@ -140,6 +143,7 @@ async def build_app_context() -> AppContext:
         memory=memory,
         image_service=image_service,
         db_client=db_client,
+        character=DEFAULT_CHARACTER,
     )
     logger.info("ChatPipeline created")
 
@@ -151,6 +155,7 @@ async def build_app_context() -> AppContext:
         memory=memory,
         image_service=image_service,
         db_client=db_client,
+        character=DEFAULT_CHARACTER,
         pipeline=pipeline,
     )
 

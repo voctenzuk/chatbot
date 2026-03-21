@@ -20,11 +20,14 @@ Architecture (tool calling):
 """
 
 import base64
-from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from bot.config import settings
+
+if TYPE_CHECKING:
+    from bot.character import CharacterConfig
 
 try:
     from openai import AsyncOpenAI
@@ -34,10 +37,8 @@ except ImportError:
     _openai_available = False
     AsyncOpenAI = None
 
-_MAX_IMAGES_PER_DAY = 5
-
-# Note: Image generation is tracked via rate limiting (_send_counts),
-# not via Langfuse (no LangChain call to instrument).
+# Note: Image generation is tracked via DB-based rate limiting (try_consume_photo),
+# not via in-memory counters.
 
 # Tool schema for LangChain bind_tools() -- bare dict format (no "type"/"function" wrapper)
 SEND_PHOTO_TOOL = {
@@ -63,13 +64,12 @@ SEND_PHOTO_TOOL = {
 class ImageService:
     """Generates images via OpenAI Images API.
 
-    Rate-limited to _MAX_IMAGES_PER_DAY per user per day.
     Gracefully unavailable if openai package is not installed
     or API key is not configured.
     """
 
-    def __init__(self) -> None:
-        self._send_counts: dict[int, dict[str, int]] = {}
+    def __init__(self, character: "CharacterConfig | None" = None) -> None:
+        self._character = character
         self._model = settings.image_model
 
         if not _openai_available:
@@ -94,31 +94,15 @@ class ImageService:
         """Whether the service can generate images."""
         return self._client is not None
 
-    def _check_rate_limit(self, user_id: int) -> bool:
-        """Return True if user can receive more images today."""
-        today = datetime.now(tz=UTC).strftime("%Y-%m-%d")
-        user_counts = self._send_counts.get(user_id, {})
-        return user_counts.get(today, 0) < _MAX_IMAGES_PER_DAY
-
-    def _record_send(self, user_id: int) -> None:
-        """Record that an image was generated for user."""
-        today = datetime.now(tz=UTC).strftime("%Y-%m-%d")
-        if user_id not in self._send_counts:
-            self._send_counts[user_id] = {}
-        self._send_counts[user_id][today] = self._send_counts[user_id].get(today, 0) + 1
-        self._send_counts[user_id] = {
-            k: v for k, v in self._send_counts[user_id].items() if k == today
-        }
-
     async def generate(self, prompt: str, user_id: int) -> bytes | None:
         """Generate an image from a text prompt.
 
         Args:
             prompt: Description of the image to generate.
-            user_id: Telegram user ID (for rate limiting).
+            user_id: Telegram user ID (for logging).
 
         Returns:
-            Image bytes if successful, None if unavailable/rate-limited/failed.
+            Image bytes if successful, None if unavailable or failed.
         """
         if not self.available:
             logger.debug("ImageService unavailable -- skipping generation")
@@ -127,9 +111,9 @@ class ImageService:
         if not prompt or not prompt.strip():
             return None
 
-        if not self._check_rate_limit(user_id):
-            logger.debug("Image rate limit reached for user {}", user_id)
-            return None
+        # Prepend character appearance for visual consistency
+        if self._character is not None:
+            prompt = f"{self._character.appearance_en}. Scene: {prompt}"
 
         try:
             result = await self._client.images.generate(  # type: ignore[union-attr]
@@ -142,7 +126,6 @@ class ImageService:
 
             if result.data and result.data[0].b64_json:
                 image_bytes = base64.b64decode(result.data[0].b64_json)
-                self._record_send(user_id)
                 logger.info(
                     "Generated image for user {} ({} bytes, prompt: {})",
                     user_id,

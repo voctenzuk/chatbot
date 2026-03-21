@@ -23,6 +23,11 @@ from bot.media.image_service import SEND_PHOTO_TOOL
 
 LLM_FALLBACK = "Прости, у меня сейчас не получается ответить. Попробуй ещё раз чуть позже."
 
+# LLM cost per 1M tokens in cents (kimi-k2p5 pricing)
+COST_PER_1M_INPUT = 0.15
+COST_PER_1M_OUTPUT = 0.60
+IMAGE_COST_CENTS = 5.0
+
 _ROLE_MAP = {
     "user": MessageRole.USER,
     "assistant": MessageRole.ASSISTANT,
@@ -56,6 +61,7 @@ class ChatPipeline:
         memory: Any | None = None,
         image_service: Any | None = None,
         db_client: Any | None = None,
+        character: Any | None = None,
     ) -> None:
         self._llm = llm
         self.episode_manager = episode_manager
@@ -64,7 +70,18 @@ class ChatPipeline:
         self._memory = memory
         self._image_service = image_service
         self.db_client = db_client
+        self._character = character
         self._background_tasks: set[asyncio.Task[Any]] = set()
+
+    @property
+    def character(self) -> Any:
+        """Character configuration (CharacterConfig or None)."""
+        return self._character
+
+    @property
+    def image_service(self) -> Any:
+        """Image generation service (ImageService or None)."""
+        return self._image_service
 
     def _fire_and_forget(self, coro: Any) -> None:
         """Schedule a coroutine as a background task with reference tracking."""
@@ -161,11 +178,18 @@ class ChatPipeline:
 
         if self.db_client is not None and llm_response is not None:
             try:
+                cost_cents = (
+                    llm_response.tokens_in * COST_PER_1M_INPUT
+                    + llm_response.tokens_out * COST_PER_1M_OUTPUT
+                ) / 1_000_000
+                if image_bytes is not None:
+                    cost_cents += IMAGE_COST_CENTS
                 await self.db_client.increment_usage(
                     user_id,
                     msg_count=1,
                     tokens_in=llm_response.tokens_in,
                     tokens_out=llm_response.tokens_out,
+                    cost_cents=cost_cents,
                 )
             except Exception as exc:
                 logger.warning("Usage tracking failed for user {}: {}", user_id, exc)
@@ -223,7 +247,7 @@ class ChatPipeline:
             recent_messages = _episode_messages_to_conversation(recent_episode_msgs)
 
             # Assemble LLM messages via context builder
-            system_prompt = get_system_prompt(user_name=user_name)
+            system_prompt = get_system_prompt(user_name=user_name, character=self._character)
             llm_messages = self._context_builder.assemble_for_llm(
                 recent_messages=recent_messages,
                 semantic_memories=memories,
@@ -288,13 +312,25 @@ class ChatPipeline:
         """
         if tool_call.name == "send_photo":
             try:
-                if self._image_service is not None:
-                    prompt = tool_call.args.get("prompt", "")
-                    image_bytes = await self._image_service.generate(prompt, user_id)
-                    if image_bytes is not None:
-                        generated_images[tool_call.id] = image_bytes
-                        return f"Photo generated successfully for prompt: {prompt[:50]}"
-                return "Image service unavailable"
+                if self._image_service is None:
+                    return "Image service unavailable"
+
+                # Photo rate limit: fail-closed (no DB = no photos)
+                if self.db_client is not None:
+                    allowed = await self.db_client.try_consume_photo(user_id)
+                    if not allowed:
+                        return (
+                            "Лимит фото на сегодня исчерпан. Напиши /upgrade для увеличения лимита."
+                        )
+                else:
+                    return "Image service unavailable"
+
+                prompt = tool_call.args.get("prompt", "")
+                image_bytes = await self._image_service.generate(prompt, user_id)
+                if image_bytes is not None:
+                    generated_images[tool_call.id] = image_bytes
+                    return f"Photo generated successfully for prompt: {prompt[:50]}"
+                return "Image generation failed"
             except Exception as e:
                 return f"Image generation failed: {e}"
         return f"Unknown tool: {tool_call.name}"

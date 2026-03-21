@@ -163,6 +163,27 @@ class EpisodeSummary:
         )
 
 
+@dataclass
+class ProvisionResult:
+    """Result of user provisioning."""
+
+    user_id: int
+    is_new: bool
+
+
+@dataclass
+class UserUsage:
+    """Today's usage statistics for a user."""
+
+    messages_sent: int
+    photo_count: int
+    daily_limit: int | None
+    photo_limit: int | None
+    plan_slug: str | None
+    total_cost: float
+    days_together: int
+
+
 class DatabaseClient:
     """Database client for Supabase integration.
 
@@ -697,7 +718,7 @@ class DatabaseClient:
         msg_count: int = 1,
         tokens_in: int = 0,
         tokens_out: int = 0,
-        cost_cents: int = 0,
+        cost_cents: float = 0,
     ) -> None:
         """Increment usage counters for a user (fire-and-forget).
 
@@ -731,16 +752,14 @@ class DatabaseClient:
         telegram_user_id: int,
         username: str | None = None,
         first_name: str | None = None,
-    ) -> None:
+    ) -> ProvisionResult | None:
         """Provision a new user with the free plan.
 
-        Args:
-            telegram_user_id: Telegram user ID.
-            username: Optional Telegram username.
-            first_name: Optional first name.
+        Returns:
+            ProvisionResult with user_id and is_new flag, or None on error.
         """
         try:
-            self._client.rpc(
+            response = self._client.rpc(
                 "provision_user_with_free_plan",
                 {
                     "p_telegram_user_id": telegram_user_id,
@@ -748,12 +767,59 @@ class DatabaseClient:
                     "p_first_name": first_name,
                 },
             ).execute()
+            row = self._extract_rpc_row(response.data)
+            if row:
+                return ProvisionResult(
+                    user_id=row.get("user_id", telegram_user_id),
+                    is_new=bool(row.get("is_new", False)),
+                )
+            return ProvisionResult(user_id=telegram_user_id, is_new=False)
         except Exception as e:
-            logger.warning(
-                "Failed to provision user {}: {}",
-                telegram_user_id,
-                e,
+            logger.warning("Failed to provision user {}: {}", telegram_user_id, e)
+            return None
+
+    async def try_consume_photo(self, telegram_user_id: int) -> bool:
+        """Atomically check and consume a photo generation slot.
+
+        Returns True if the photo was consumed (under daily limit),
+        False if at limit or no active subscription.
+        """
+        try:
+            response = self._client.rpc(
+                "try_consume_photo",
+                {"p_user_id": telegram_user_id},
+            ).execute()
+            return bool(response.data)
+        except Exception as e:
+            logger.warning("Photo limit check failed for user {}: {}", telegram_user_id, e)
+            return False
+
+    async def get_user_usage_today(self, telegram_user_id: int) -> UserUsage | None:
+        """Get today's usage statistics for a user.
+
+        Returns:
+            UserUsage with today's counts and plan info, or None if not found.
+        """
+        try:
+            response = self._client.rpc(
+                "get_user_usage_today",
+                {"p_user_id": telegram_user_id},
+            ).execute()
+            row = self._extract_rpc_row(response.data)
+            if not row:
+                return None
+            return UserUsage(
+                messages_sent=row.get("messages_sent", 0),
+                photo_count=row.get("photo_count", 0),
+                daily_limit=row.get("daily_limit"),
+                photo_limit=row.get("photo_limit"),
+                plan_slug=row.get("plan_slug"),
+                total_cost=float(row.get("total_cost", 0)),
+                days_together=row.get("days_together", 0),
             )
+        except Exception as e:
+            logger.warning("Failed to get usage for user {}: {}", telegram_user_id, e)
+            return None
 
     async def get_all_user_ids(self) -> list[int]:
         """Get all telegram user IDs from threads table."""
