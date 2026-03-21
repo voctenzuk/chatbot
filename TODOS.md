@@ -27,16 +27,23 @@
 
 ## P3 — Nice to Have
 
+### Graph Memory для mem0 (Apache AGE / Kuzu)
+**What:** Добавить graph memory backend к mem0 для multi-hop рассуждений о связях между фактами.
+**Why:** Vector-only поиск не находит косвенные связи ("Алиса работает с Бобом → Боб любит кофе → принести кофе Алисе для Боба"). Graph memory добавляет entity-relationship traversal.
+**Context:** mem0 поддерживает 6 graph backends: Neo4j, Memgraph, Kuzu (embedded), Apache AGE (Postgres extension), Neptune. Kuzu = zero infra. Но: +2x tokens per add(), баг с non-OpenAI providers для structuredLlm.
+**Effort:** M (CC ~30 min)
+**Depends on:** mem0 миграция (завершена)
+
 ### Remove get_*()/set_*() Singletons from Services
-**What:** Удалить `get_*()` / `set_*()` из всех сервисов (llm_service, cognee_service, context_builder, langfuse_service, image_service, db_client, episode_manager). Все потребители уже используют constructor injection через `AppContext`.
+**What:** Удалить `get_*()` / `set_*()` из всех сервисов (llm_service, mem0_service, context_builder, langfuse_service, image_service, db_client, episode_manager). Все потребители уже используют constructor injection через `AppContext`.
 **Why:** Двойной DI (composition root + модульные синглтоны) создаёт риск split-brain — два разных экземпляра сервиса в одном процессе.
 **Context:** `ProactiveScheduler` всё ещё использует `get_*()` внутри методов. Нужно сначала рефакторить его на constructor injection, затем можно удалить все `get_*()/set_*()`.
 **Effort:** S (CC ~15 min)
 **Depends on:** Composition Root рефакторинг (завершён) + рефакторинг ProactiveScheduler
 
 ### Scaling Path Documentation
-**What:** Документ с конкретными триггерами масштабирования: 100+ DAU → webhooks, 500+ DAU → отдельный proactive worker, 1000+ DAU → cognee worker.
+**What:** Документ с конкретными триггерами масштабирования: 100+ DAU → webhooks, 500+ DAU → отдельный proactive worker, 1000+ DAU → mem0 worker.
 **Why:** Текущая архитектура (polling, single process) работает на ~100 пользователей. Нужно знать заранее, когда и что менять.
-**Context:** Polling mode в aiogram, proactive scheduler в том же процессе, cognee in-process. Каждый из этих компонентов — потенциальное bottleneck.
+**Context:** Polling mode в aiogram, proactive scheduler в том же процессе, mem0 in-process. Каждый из этих компонентов — потенциальное bottleneck.
 **Effort:** S (CC ~15 min, это документ, не код)
 **Depends on:** ничего
