@@ -7,6 +7,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import BufferedInputFile, LabeledPrice, Message, PreCheckoutQuery
 from loguru import logger
 
+from bot.character import CharacterConfig
 from bot.chat_pipeline import LLM_FALLBACK, ChatPipeline
 
 router = Router()
@@ -14,37 +15,63 @@ router = Router()
 
 @router.message(CommandStart())
 async def start(message: Message, pipeline: ChatPipeline) -> None:
-    """Handle /start command."""
+    """Handle /start command — onboarding for new users, welcome back for returning."""
     user_id = message.from_user.id if message.from_user else 0
     user_name = getattr(message.from_user, "first_name", None) if message.from_user else None
 
     try:
         await pipeline.episode_manager.process_user_message(user_id=user_id, content="/start")
 
-        # Provision user in DB
+        # Provision user and detect new vs returning
+        is_new = False
         db = pipeline.db_client
         if db is not None:
             try:
                 username = (
                     getattr(message.from_user, "username", None) if message.from_user else None
                 )
-                await db.provision_user(user_id, username=username, first_name=user_name)
+                result = await db.provision_user(user_id, username=username, first_name=user_name)
+                if result is not None:
+                    is_new = result.is_new
             except Exception as e:
                 logger.warning("Failed to provision user {}: {}", user_id, e)
 
-        response = "Привет. Я рядом 🙂\nРасскажи, как тебя зовут?"
+        character: CharacterConfig | None = pipeline.character
+
+        if is_new and character is not None:
+            # New user onboarding: greeting + photo + prompt
+            await message.answer(character.greeting)
+
+            # Free onboarding photo (bypasses pipeline rate limit)
+            img_service = pipeline.image_service
+            if img_service is not None:
+                try:
+                    photo = await img_service.generate("casual selfie, smiling warmly", user_id)
+                    if photo:
+                        await message.answer_photo(
+                            photo=BufferedInputFile(photo, filename="hello.png"),
+                        )
+                except Exception as e:
+                    logger.warning("Onboarding photo failed for user {}: {}", user_id, e)
+
+            response = "Расскажи, как тебя зовут? 😊"
+        elif is_new:
+            response = "Привет! Я рядом 🙂\nРасскажи, как тебя зовут?"
+        else:
+            response = "С возвращением! 💕"
+
         await pipeline.episode_manager.process_assistant_message(user_id=user_id, content=response)
         await message.answer(response)
 
     except RuntimeError as e:
         logger.error("Episode manager runtime error in start for user {}: {}", user_id, e)
         await message.answer(
-            "Привет. Я рядом 🙂\nРасскажи, как тебя зовут?\n\n"
+            "Привет! Я рядом 🙂\nРасскажи, как тебя зовут?\n\n"
             "⚠️ Примечание: в данный момент сообщения не сохраняются в базе данных."
         )
     except Exception as e:
         logger.error("Error in start handler for user {}: {}", user_id, e)
-        await message.answer("Привет. Я рядом 🙂\nРасскажи, как тебя зовут?")
+        await message.answer("Привет! Я рядом 🙂\nРасскажи, как тебя зовут?")
 
 
 @router.message(Command("upgrade"))
@@ -107,6 +134,35 @@ async def successful_payment(message: Message, db_client: Any | None = None) -> 
         await message.answer(
             "Прости, при обработке платежа что-то пошло не так. Напиши /start и попробуй снова."
         )
+
+
+@router.message(Command("stats"))
+async def stats(message: Message, pipeline: ChatPipeline) -> None:
+    """Show usage statistics for the current user."""
+    user_id = message.from_user.id if message.from_user else 0
+    db = pipeline.db_client
+    if db is None:
+        await message.answer("Статистика временно недоступна.")
+        return
+    try:
+        usage = await db.get_user_usage_today(user_id)
+        if not usage:
+            await message.answer("Статистика пока пуста — напиши мне что-нибудь!")
+            return
+        msg_limit = str(usage.daily_limit) if usage.daily_limit else "∞"
+        photo_limit = str(usage.photo_limit) if usage.photo_limit else "∞"
+        plan_name = usage.plan_slug.title() if usage.plan_slug else "Free"
+        text = (
+            f"📊 Сегодня:\n"
+            f"💬 Сообщений: {usage.messages_sent}/{msg_limit}\n"
+            f"📷 Фото: {usage.photo_count}/{photo_limit}\n"
+            f"📋 План: {plan_name}\n"
+            f"📅 Дней вместе: {usage.days_together}"
+        )
+        await message.answer(text)
+    except Exception as e:
+        logger.error("Error in stats handler for user {}: {}", user_id, e)
+        await message.answer("Не удалось загрузить статистику. Попробуй позже.")
 
 
 @router.message()
