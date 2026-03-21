@@ -14,7 +14,13 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Protocol, Self
 
+from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableConfig
+from langchain_openai import ChatOpenAI
 from loguru import logger
+from pydantic import SecretStr
+
+from bot.config import settings
 
 
 class LLMProvider(Protocol):
@@ -39,13 +45,10 @@ class SimpleLLMProvider:
         model: str = "gpt-4o-mini",
         base_url: str | None = None,
     ) -> None:
-        from langchain_openai import ChatOpenAI
-
-        from bot.config import settings
-
+        raw_key = api_key or settings.llm_api_key
         self._model = ChatOpenAI(
             model=model,
-            api_key=api_key or settings.llm_api_key,
+            api_key=SecretStr(raw_key) if raw_key else None,
             base_url=base_url or settings.llm_base_url,
         )
 
@@ -53,10 +56,9 @@ class SimpleLLMProvider:
         self, prompt: str, temperature: float = 0.7, config: dict[str, Any] | None = None
     ) -> str:
         """Generate text using LangChain ChatOpenAI."""
-        from langchain_core.messages import HumanMessage
-
         model = self._model.bind(temperature=temperature)
-        result = await model.ainvoke([HumanMessage(content=prompt)], config=config or {})
+        effective_config = RunnableConfig(**config) if config else None
+        result = await model.ainvoke([HumanMessage(content=prompt)], config=effective_config)
         return str(result.content)
 
 

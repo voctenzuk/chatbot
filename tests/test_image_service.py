@@ -1,6 +1,7 @@
 """Tests for image generation service and tool-calling handler integration."""
 
 import base64
+from contextlib import nullcontext
 from datetime import datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -9,14 +10,14 @@ from uuid import uuid4
 import pytest
 
 from bot.chat_pipeline import ChatPipeline
-from bot.services.llm_service import LLMResponse, ToolCall
+from bot.llm.service import LLMResponse, ToolCall
 
 
 class TestSendPhotoToolSchema:
     """Tests for the SEND_PHOTO_TOOL schema."""
 
     def test_tool_schema_structure(self) -> None:
-        from bot.services.image_service import SEND_PHOTO_TOOL
+        from bot.media.image_service import SEND_PHOTO_TOOL
 
         assert SEND_PHOTO_TOOL["name"] == "send_photo"
         assert "prompt" in SEND_PHOTO_TOOL["parameters"]["properties"]
@@ -24,7 +25,7 @@ class TestSendPhotoToolSchema:
 
     def test_send_photo_tool_format(self) -> None:
         """SEND_PHOTO_TOOL should be in bare dict format for bind_tools()."""
-        from bot.services.image_service import SEND_PHOTO_TOOL
+        from bot.media.image_service import SEND_PHOTO_TOOL
 
         assert "name" in SEND_PHOTO_TOOL
         assert "parameters" in SEND_PHOTO_TOOL
@@ -49,7 +50,7 @@ class TestImageServiceGenerate:
 
     @pytest.fixture
     def service(self, mock_openai_client: AsyncMock) -> Any:
-        from bot.services.image_service import ImageService
+        from bot.media.image_service import ImageService
 
         svc = ImageService.__new__(ImageService)
         svc._client = mock_openai_client
@@ -86,7 +87,7 @@ class TestImageServiceGenerate:
 
     @pytest.mark.asyncio
     async def test_unavailable_returns_none(self) -> None:
-        from bot.services.image_service import ImageService
+        from bot.media.image_service import ImageService
 
         svc = ImageService.__new__(ImageService)
         svc._client = None
@@ -171,7 +172,7 @@ class TestHandlerToolCallIntegration:
         )
 
         mock_langfuse = MagicMock()
-        mock_langfuse.create_config = MagicMock(return_value={})
+        mock_langfuse.trace = MagicMock(return_value=nullcontext())
 
         with (
             patch("bot.chat_pipeline.get_system_prompt", return_value="sys"),
@@ -237,7 +238,7 @@ class TestHandlerToolCallIntegration:
         )
 
         mock_langfuse = MagicMock()
-        mock_langfuse.create_config = MagicMock(return_value={})
+        mock_langfuse.trace = MagicMock(return_value=nullcontext())
 
         with patch("bot.chat_pipeline.get_system_prompt", return_value="sys"):
             pipeline = ChatPipeline(
@@ -295,7 +296,7 @@ class TestHandlerToolCallIntegration:
         )
 
         mock_langfuse = MagicMock()
-        mock_langfuse.create_config = MagicMock(return_value={})
+        mock_langfuse.trace = MagicMock(return_value=nullcontext())
 
         with (
             patch("bot.chat_pipeline.get_system_prompt", return_value="sys"),

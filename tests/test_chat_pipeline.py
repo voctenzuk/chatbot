@@ -1,12 +1,13 @@
 """Tests for ChatPipeline — framework-agnostic chat logic."""
 
 import asyncio
+from contextlib import nullcontext
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from bot.chat_pipeline import _LLM_FALLBACK, ChatPipeline, ChatResult
-from bot.services.llm_service import LLMResponse, ToolCall
+from bot.llm.service import LLMResponse, ToolCall
 
 
 def _make_episode_manager() -> MagicMock:
@@ -37,7 +38,7 @@ def _make_llm_response(content: str = "Привет!", **kwargs: object) -> LLMR
 
 def _make_langfuse() -> MagicMock:
     lf = MagicMock()
-    lf.create_config = MagicMock(return_value={})
+    lf.trace = MagicMock(return_value=nullcontext())
     return lf
 
 

@@ -55,7 +55,7 @@ class ProactiveScheduler:
             try:
                 from apscheduler.jobstores.redis import RedisJobStore as _RedisJobStore
 
-                jobstores["default"] = _RedisJobStore(url=settings.redis_url)  # type: ignore[assignment]
+                jobstores["default"] = _RedisJobStore(url=settings.redis_url)
                 logger.info("ProactiveScheduler using Redis job store")
             except Exception as e:
                 logger.warning("Redis job store failed, using memory: {}", e)
@@ -171,12 +171,12 @@ class ProactiveScheduler:
                 {"role": "user", "content": "(ожидает твоё сообщение)"},
             ]
 
-            lf_config = get_langfuse_service().create_config(
+            with get_langfuse_service().trace(
                 user_id=user_id,
                 trace_name="proactive",
                 tags=["proactive"],
-            )
-            llm_response = await get_llm_service().generate(messages, config=lf_config)
+            ):
+                llm_response = await get_llm_service().generate(messages)
             await self._delivery.send_text(chat_id=user_id, text=llm_response.content)
             self._record_send(user_id)
 

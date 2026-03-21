@@ -318,7 +318,8 @@ class MemoryCleanupService:
         if effective_importance < self.config.min_importance_threshold:
             return (
                 True,
-                f"Below importance threshold ({effective_importance:.2f} < {self.config.min_importance_threshold})",
+                f"Below importance threshold"
+                f" ({effective_importance:.2f} < {self.config.min_importance_threshold})",
             )
 
         return False, "Within retention criteria"
@@ -498,8 +499,8 @@ class MemoryCleanupService:
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 combined_report.errors.append(f"User {user_ids[i]}: {result}")
-            else:
-                user_report: CleanupReport = result
+            elif isinstance(result, CleanupReport):
+                user_report = result
                 combined_report.total_memories_scanned += user_report.total_memories_scanned
                 combined_report.memories_kept += user_report.memories_kept
                 combined_report.memories_decayed += user_report.memories_decayed

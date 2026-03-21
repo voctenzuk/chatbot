@@ -1,5 +1,6 @@
 """Tests for monetization features: rate limiting, usage tracking, cost estimation, payments."""
 
+from contextlib import nullcontext
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -8,8 +9,8 @@ import pytest
 from aiogram.types import Chat, User
 
 from bot.chat_pipeline import ChatPipeline
-from bot.services.db_client import DatabaseClient
-from bot.services.llm_service import LLMResponse
+from bot.infra.db_client import DatabaseClient
+from bot.llm.service import LLMResponse
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -316,7 +317,7 @@ def mock_pipeline(
 ) -> ChatPipeline:
     """Create a ChatPipeline with all mock dependencies including db_client."""
     mock_langfuse = MagicMock()
-    mock_langfuse.create_config = MagicMock(return_value={})
+    mock_langfuse.trace = MagicMock(return_value=nullcontext())
 
     return ChatPipeline(
         llm=mock_llm_service,

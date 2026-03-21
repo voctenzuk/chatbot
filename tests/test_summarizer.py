@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from bot.services.summarizer import (
+from bot.conversation.summarizer import (
     ArtifactReference,
     FactCandidate,
     Summarizer,

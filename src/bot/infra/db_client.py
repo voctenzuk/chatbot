@@ -32,8 +32,8 @@ try:
     SUPABASE_AVAILABLE = True
 except ImportError:
     SUPABASE_AVAILABLE = False
-    Client = None  # type: ignore[misc, assignment]
-    create_client = None  # type: ignore[misc, assignment]
+    Client = None
+    create_client = None
 
 
 class DatabaseClientProtocol(Protocol):
@@ -199,7 +199,8 @@ class DatabaseClient:
 
         Args:
             url: Supabase URL. If not provided, reads from SUPABASE_URL env var.
-            key: Supabase service role key. If not provided, reads from SUPABASE_SERVICE_KEY env var.
+            key: Supabase service role key. If not provided,
+                reads from SUPABASE_SERVICE_KEY env var.
             client: Optional pre-configured client (for testing/mocking).
 
         Raises:
@@ -252,7 +253,7 @@ class DatabaseClient:
             ).execute()
 
             row = self._extract_rpc_row(response.data)
-            if row and isinstance(row, dict) and "id" in row:
+            if row and "id" in row:
                 return Thread.from_row(row)
             # Fallback: scalar UUID returned
             thread_id = self._extract_rpc_uuid(response.data, "get_or_create_thread")
@@ -327,7 +328,7 @@ class DatabaseClient:
             ).execute()
 
             row = self._extract_rpc_row(response.data)
-            if row and isinstance(row, dict) and "id" in row:
+            if row and "id" in row:
                 return Episode.from_row(row)
             episode_id = self._extract_rpc_uuid(response.data, "start_new_episode")
             return await self.get_episode_by_id(episode_id)
@@ -436,7 +437,7 @@ class DatabaseClient:
             ).execute()
 
             row = self._extract_rpc_row(response.data)
-            if row and isinstance(row, dict) and "id" in row:
+            if row and "id" in row:
                 return EpisodeMessage.from_row(row)
             message_id = self._extract_rpc_uuid(response.data, "add_message_to_current_episode")
             return await self.get_message_by_id(message_id)
@@ -626,7 +627,7 @@ class DatabaseClient:
             ).execute()
 
             row = self._extract_rpc_row(response.data)
-            if row and isinstance(row, dict) and "id" in row:
+            if row and "id" in row:
                 return EpisodeSummary.from_row(row)
             summary_id = self._extract_rpc_uuid(response.data, "upsert_episode_summary")
             return await self.get_summary_by_id(summary_id)

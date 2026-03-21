@@ -7,11 +7,15 @@ This module provides automatic episode switching based on:
 """
 
 import math
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Protocol
 
+from langchain_openai import OpenAIEmbeddings
 from loguru import logger
+
+from bot.config import settings
 
 
 class EmbeddingProvider(Protocol):
@@ -89,10 +93,6 @@ class OpenAIEmbeddingProvider:
         api_key: str | None = None,
         model: str = "text-embedding-3-small",
     ) -> None:
-        from langchain_openai import OpenAIEmbeddings
-
-        from bot.config import settings
-
         self._embeddings = OpenAIEmbeddings(
             model=model,
             api_key=api_key or settings.llm_api_key,  # type: ignore[arg-type]
@@ -335,7 +335,10 @@ class EpisodeManager:
         if time_since_start < self.config.min_episode_duration:
             return SwitchDecision(
                 should_switch=False,
-                reason=f"Episode too young ({time_since_start:.0f}s < {self.config.min_episode_duration}s)",
+                reason=(
+                    f"Episode too young ({time_since_start:.0f}s"
+                    f" < {self.config.min_episode_duration}s)"
+                ),
                 confidence=1.0,
                 trigger_type="anti_flap_min_duration",
             )
@@ -365,14 +368,21 @@ class EpisodeManager:
         if time_trigger and topic_trigger:
             return SwitchDecision(
                 should_switch=True,
-                reason=f"Time gap ({(current_time - last_message.timestamp).total_seconds() / 60:.0f}min) and topic shift detected",
+                reason=(
+                    f"Time gap"
+                    f" ({(current_time - last_message.timestamp).total_seconds() / 60:.0f}min)"
+                    " and topic shift detected"
+                ),
                 confidence=combined_score,
                 trigger_type="combined",
             )
         elif time_trigger and time_confidence > 0.7:
             return SwitchDecision(
                 should_switch=True,
-                reason=f"Significant time gap: {(current_time - last_message.timestamp).total_seconds() / 60:.0f} minutes",
+                reason=(
+                    "Significant time gap:"
+                    f" {(current_time - last_message.timestamp).total_seconds() / 60:.0f} minutes"
+                ),
                 confidence=time_confidence,
                 trigger_type="time_gap",
             )
@@ -650,8 +660,6 @@ class EpisodeManager:
                 "\u0442\u0430\u043a\u043e\u0439",
             }
             words = [w for w in all_text.split() if len(w) > 3 and w not in stop_words]
-            from collections import Counter
-
             topics = [word for word, _ in Counter(words).most_common(5)]
 
         duration_mins = episode.duration_seconds / 60

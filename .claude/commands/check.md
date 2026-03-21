@@ -2,7 +2,7 @@ Run all CI checks sequentially. Fix any failures and re-run until everything pas
 
 1. Run `uvx ruff format --check .` (formatting)
 2. Run `uvx ruff check .` (linting)
-3. Run `uv run pyright` (type checking)
+3. Run `uvx pyright` (type checking)
 4. Run `uv run pytest` (tests)
 
 After all four checks complete:

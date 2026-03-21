@@ -39,8 +39,8 @@ sys.path.insert(0, str(src_path))
 
 from loguru import logger  # noqa: E402
 
-from bot.services.cognee_memory_service import get_memory_service  # noqa: E402
-from bot.services.memory_cleanup import CleanupConfig, MemoryCleanupService  # noqa: E402
+from bot.memory.cleanup import CleanupConfig, MemoryCleanupService  # noqa: E402
+from bot.memory.cognee_service import get_memory_service  # noqa: E402
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -50,7 +50,11 @@ def setup_logging(verbose: bool = False) -> None:
     logger.add(
         sys.stderr,
         level=log_level,
-        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level:<8}</level> | <level>{message}</level>",
+        format=(
+            "<green>{time:YYYY-MM-DD HH:mm:ss}</green>"
+            " | <level>{level:<8}</level>"
+            " | <level>{message}</level>"
+        ),
     )
 
 
@@ -144,7 +148,8 @@ def show_config() -> None:
     print("Base Settings:")
     print(f"  Default TTL days:        {config.default_ttl_days}")
     print(
-        f"  Decay rate:              {config.importance_decay_rate} ({config.importance_decay_rate * 100:.1f}% per day)"
+        f"  Decay rate:              {config.importance_decay_rate}"
+        f" ({config.importance_decay_rate * 100:.1f}% per day)"
     )
     print(f"  Min importance:          {config.min_importance_threshold}")
     print(f"  Max memories per user:   {config.max_memories_per_user}")
@@ -270,7 +275,8 @@ async def run_cleanup(args: argparse.Namespace) -> int:
             print("Cleanup Report")
             print("=" * 60)
             print(
-                f"Mode:              {'DRY RUN (preview only)' if dry_run else 'LIVE (changes made)'}"
+                f"Mode:              "
+                f"{'DRY RUN (preview only)' if dry_run else 'LIVE (changes made)'}"
             )
             print(f"Users processed:   {len(report.users_processed)}")
             print(f"Memories scanned:  {report.total_memories_scanned}")

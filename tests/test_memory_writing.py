@@ -6,6 +6,7 @@ Cognify is triggered periodically after N writes.
 """
 
 import asyncio
+from contextlib import nullcontext
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -14,7 +15,7 @@ import pytest
 from aiogram.types import Chat, User
 
 from bot.chat_pipeline import ChatPipeline
-from bot.services.llm_service import LLMResponse
+from bot.llm.service import LLMResponse
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -170,7 +171,7 @@ def pipeline_with_memory(
 ) -> ChatPipeline:
     """Create a ChatPipeline with memory service for testing memory writes."""
     mock_langfuse = MagicMock()
-    mock_langfuse.create_config = MagicMock(return_value={})
+    mock_langfuse.trace = MagicMock(return_value=nullcontext())
 
     return ChatPipeline(
         llm=mock_llm_service,
@@ -191,7 +192,7 @@ def pipeline_without_memory(
 ) -> ChatPipeline:
     """Create a ChatPipeline without memory service."""
     mock_langfuse = MagicMock()
-    mock_langfuse.create_config = MagicMock(return_value={})
+    mock_langfuse.trace = MagicMock(return_value=nullcontext())
 
     return ChatPipeline(
         llm=mock_llm_service,
@@ -280,7 +281,7 @@ class TestMemoryWriting:
     ) -> None:
         """After N writes on the same pipeline instance, cognify() is triggered."""
         mock_langfuse = MagicMock()
-        mock_langfuse.create_config = MagicMock(return_value={})
+        mock_langfuse.trace = MagicMock(return_value=nullcontext())
 
         pipeline = ChatPipeline(
             llm=mock_llm_service,
@@ -311,7 +312,7 @@ class TestMemoryWriting:
     ) -> None:
         """Before N writes, cognify is NOT triggered."""
         mock_langfuse = MagicMock()
-        mock_langfuse.create_config = MagicMock(return_value={})
+        mock_langfuse.trace = MagicMock(return_value=nullcontext())
 
         pipeline = ChatPipeline(
             llm=mock_llm_service,

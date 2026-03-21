@@ -12,7 +12,7 @@ class TestLLMPort:
 
     @pytest.mark.asyncio
     async def test_llm_service_satisfies_protocol(self) -> None:
-        from bot.services.llm_service import LLMService
+        from bot.llm.service import LLMService
 
         mock_model = MagicMock()
         mock_model.ainvoke = AsyncMock(

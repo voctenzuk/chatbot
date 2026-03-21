@@ -13,6 +13,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages.utils import count_tokens_approximately, trim_messages
 from loguru import logger
 
 from bot.memory.models import MemoryCategory, MemoryFact, MemoryType
@@ -570,12 +572,6 @@ class ContextBuilder:
 
     def _trim_final_messages(self, messages: list[dict[str, str]]) -> list[dict[str, str]]:
         """Apply LangChain trim_messages as a final guardrail against overflow."""
-        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-        from langchain_core.messages.utils import (
-            count_tokens_approximately,
-            trim_messages,
-        )
-
         role_cls = {
             "system": SystemMessage,
             "assistant": AIMessage,

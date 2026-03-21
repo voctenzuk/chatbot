@@ -1,5 +1,6 @@
 """Tests for proactive messaging scheduler."""
 
+from contextlib import nullcontext
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -18,15 +19,15 @@ class TestProactiveSchedulerCore:
 
     @pytest.fixture
     def scheduler(self, mock_delivery):
-        with patch("bot.services.proactive_scheduler.AsyncIOScheduler"):
-            from bot.services.proactive_scheduler import ProactiveScheduler
+        with patch("bot.adapters.proactive_scheduler.AsyncIOScheduler"):
+            from bot.adapters.proactive_scheduler import ProactiveScheduler
 
             return ProactiveScheduler(mock_delivery)
 
     @pytest.mark.asyncio
     async def test_send_proactive_message_happy_path(self, scheduler, mock_delivery):
         """Message is generated via LLM and sent via delivery.send_text."""
-        from bot.services.llm_service import LLMResponse
+        from bot.llm.service import LLMResponse
 
         mock_llm = MagicMock()
         mock_llm.generate = AsyncMock(
@@ -36,14 +37,14 @@ class TestProactiveSchedulerCore:
         )
 
         mock_langfuse = MagicMock()
-        mock_langfuse.create_config.return_value = {}
+        mock_langfuse.trace = MagicMock(return_value=nullcontext())
 
         with (
-            patch("bot.services.proactive_scheduler.get_llm_service", return_value=mock_llm),
-            patch("bot.services.proactive_scheduler.get_system_prompt", return_value="test prompt"),
+            patch("bot.adapters.proactive_scheduler.get_llm_service", return_value=mock_llm),
+            patch("bot.adapters.proactive_scheduler.get_system_prompt", return_value="test prompt"),
             patch.object(scheduler, "_is_quiet_hours", return_value=False),
-            patch("bot.services.episode_manager.get_episode_manager") as mock_em,
-            patch("bot.services.langfuse_service.get_langfuse_service", return_value=mock_langfuse),
+            patch("bot.conversation.episode_manager.get_episode_manager") as mock_em,
+            patch("bot.infra.langfuse_service.get_langfuse_service", return_value=mock_langfuse),
         ):
             mock_manager = MagicMock()
             mock_manager.db = None
@@ -67,7 +68,7 @@ class TestProactiveSchedulerCore:
     @pytest.mark.asyncio
     async def test_anti_spam_blocks_after_max(self, scheduler, mock_delivery):
         """After 3 messages/day, further sends are blocked."""
-        from bot.services.llm_service import LLMResponse
+        from bot.llm.service import LLMResponse
 
         mock_llm = MagicMock()
         mock_llm.generate = AsyncMock(
@@ -75,14 +76,14 @@ class TestProactiveSchedulerCore:
         )
 
         mock_langfuse = MagicMock()
-        mock_langfuse.create_config.return_value = {}
+        mock_langfuse.trace = MagicMock(return_value=nullcontext())
 
         with (
-            patch("bot.services.proactive_scheduler.get_llm_service", return_value=mock_llm),
-            patch("bot.services.proactive_scheduler.get_system_prompt", return_value="test"),
+            patch("bot.adapters.proactive_scheduler.get_llm_service", return_value=mock_llm),
+            patch("bot.adapters.proactive_scheduler.get_system_prompt", return_value="test"),
             patch.object(scheduler, "_is_quiet_hours", return_value=False),
-            patch("bot.services.episode_manager.get_episode_manager") as mock_em,
-            patch("bot.services.langfuse_service.get_langfuse_service", return_value=mock_langfuse),
+            patch("bot.conversation.episode_manager.get_episode_manager") as mock_em,
+            patch("bot.infra.langfuse_service.get_langfuse_service", return_value=mock_langfuse),
         ):
             mock_manager = MagicMock()
             mock_manager.db = None
@@ -104,8 +105,8 @@ class TestProactiveSchedulerCore:
         mock_llm.generate = AsyncMock(side_effect=Exception("LLM timeout"))
 
         with (
-            patch("bot.services.proactive_scheduler.get_llm_service", return_value=mock_llm),
-            patch("bot.services.proactive_scheduler.get_system_prompt", return_value="test"),
+            patch("bot.adapters.proactive_scheduler.get_llm_service", return_value=mock_llm),
+            patch("bot.adapters.proactive_scheduler.get_system_prompt", return_value="test"),
             patch.object(scheduler, "_is_quiet_hours", return_value=False),
         ):
             result = await scheduler.send_proactive_message(123, "test")
@@ -116,7 +117,7 @@ class TestProactiveSchedulerCore:
     @pytest.mark.asyncio
     async def test_send_telegram_error_swallowed(self, scheduler, mock_delivery):
         """delivery.send_text error is caught and logged, returns False."""
-        from bot.services.llm_service import LLMResponse
+        from bot.llm.service import LLMResponse
 
         mock_llm = MagicMock()
         mock_llm.generate = AsyncMock(
@@ -125,8 +126,8 @@ class TestProactiveSchedulerCore:
         mock_delivery.send_text = AsyncMock(side_effect=Exception("Forbidden: bot was blocked"))
 
         with (
-            patch("bot.services.proactive_scheduler.get_llm_service", return_value=mock_llm),
-            patch("bot.services.proactive_scheduler.get_system_prompt", return_value="test"),
+            patch("bot.adapters.proactive_scheduler.get_llm_service", return_value=mock_llm),
+            patch("bot.adapters.proactive_scheduler.get_system_prompt", return_value="test"),
             patch.object(scheduler, "_is_quiet_hours", return_value=False),
         ):
             result = await scheduler.send_proactive_message(123, "test")
@@ -135,14 +136,14 @@ class TestProactiveSchedulerCore:
 
     def test_quiet_hours_at_2am(self, scheduler):
         """2:00 AM is quiet hours."""
-        with patch("bot.services.proactive_scheduler.datetime") as mock_dt:
+        with patch("bot.adapters.proactive_scheduler.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2026, 3, 19, 2, 0)
             mock_dt.side_effect = lambda *a, **k: datetime(*a, **k)
             assert scheduler._is_quiet_hours() is True
 
     def test_quiet_hours_at_10am(self, scheduler):
         """10:00 AM is not quiet hours."""
-        with patch("bot.services.proactive_scheduler.datetime") as mock_dt:
+        with patch("bot.adapters.proactive_scheduler.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2026, 3, 19, 10, 0)
             mock_dt.side_effect = lambda *a, **k: datetime(*a, **k)
             assert scheduler._is_quiet_hours() is False
@@ -160,8 +161,8 @@ class TestProactiveSchedulerTriggers:
 
     @pytest.fixture
     def scheduler(self, mock_delivery):
-        with patch("bot.services.proactive_scheduler.AsyncIOScheduler"):
-            from bot.services.proactive_scheduler import ProactiveScheduler
+        with patch("bot.adapters.proactive_scheduler.AsyncIOScheduler"):
+            from bot.adapters.proactive_scheduler import ProactiveScheduler
 
             return ProactiveScheduler(mock_delivery)
 

@@ -6,6 +6,8 @@ AppContext groups all services so they can be passed around as a unit.
 """
 
 import asyncio
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -30,21 +32,21 @@ class AppContext:
     pipeline: Any | None = None  # ChatPipeline (set after construction)
     _background_tasks: set[asyncio.Task[Any]] = field(default_factory=set, repr=False)
 
-    async def shutdown(self, timeout: float = 5.0) -> None:
+    async def shutdown(self, shutdown_timeout: float = 5.0) -> None:
         """Graceful shutdown: await background tasks, stop scheduler, flush langfuse."""
         # 1. Await pending background tasks from pipeline
         if self.pipeline is not None:
             pending = list(getattr(self.pipeline, "_background_tasks", set()))
             if pending:
                 logger.info("Waiting for {} background tasks to complete...", len(pending))
-                done, not_done = await asyncio.wait(pending, timeout=timeout)
+                done, not_done = await asyncio.wait(pending, timeout=shutdown_timeout)
                 for task in not_done:
                     task.cancel()
                 if not_done:
                     logger.warning(
                         "Cancelled {} background tasks after {}s timeout",
                         len(not_done),
-                        timeout,
+                        shutdown_timeout,
                     )
 
         # 2. Stop proactive scheduler
@@ -164,11 +166,9 @@ async def build_app_context() -> AppContext:
 class _StubLangfuse:
     """No-op stub when Langfuse is unavailable."""
 
-    def create_config(self, **kwargs: Any) -> dict[str, Any]:
-        return {}
-
-    def create_handler(self, **kwargs: Any) -> Any:
-        return None
+    @contextmanager
+    def trace(self, **kwargs: Any) -> Iterator[None]:
+        yield
 
     def flush(self) -> None:
         pass

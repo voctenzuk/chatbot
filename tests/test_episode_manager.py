@@ -14,12 +14,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from bot.services.db_client import DatabaseClient, Episode, EpisodeMessage, Thread
-from bot.services.episode_manager import (
+from bot.conversation.episode_manager import (
     EpisodeManager,
     EpisodeManagerConfig,
     MessageResult,
 )
+from bot.infra.db_client import DatabaseClient, Episode, EpisodeMessage, Thread
 
 
 class MockEmbeddingProvider:
@@ -589,7 +589,7 @@ class TestGlobalInstance:
 
     def test_set_episode_manager(self):
         """Test setting global instance."""
-        from bot.services.episode_manager import get_episode_manager, set_episode_manager
+        from bot.conversation.episode_manager import get_episode_manager, set_episode_manager
 
         custom_manager = MagicMock(spec=EpisodeManager)
         set_episode_manager(custom_manager)

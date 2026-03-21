@@ -8,7 +8,7 @@ This module provides episode management with:
 
 import asyncio
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 
@@ -88,8 +88,6 @@ class EpisodeManager:
 
     def _get_recent_switch_count(self, user_id: int, window_hours: float = 1.0) -> int:
         """Count recent episode switches for anti-flap."""
-        from datetime import timedelta
-
         if user_id not in self._switch_history:
             return 0
 

@@ -32,7 +32,7 @@ try:
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
-    AsyncOpenAI = None  # type: ignore[assignment, misc]
+    AsyncOpenAI = None
 
 _MAX_IMAGES_PER_DAY = 5
 

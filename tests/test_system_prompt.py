@@ -1,6 +1,6 @@
 """Tests for system prompt service."""
 
-from bot.services.system_prompt import (
+from bot.conversation.system_prompt import (
     DEFAULT_SYSTEM_PROMPT,
     _sanitize_user_name,
     get_system_prompt,

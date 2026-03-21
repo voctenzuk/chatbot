@@ -68,7 +68,7 @@ class TestAppContext:
             langfuse=MagicMock(),
             pipeline=pipeline,
         )
-        await ctx.shutdown(timeout=5.0)
+        await ctx.shutdown(shutdown_timeout=5.0)
         assert completed is True
 
     async def test_shutdown_cancels_on_timeout(self) -> None:
@@ -86,7 +86,7 @@ class TestAppContext:
             langfuse=MagicMock(),
             pipeline=pipeline,
         )
-        await ctx.shutdown(timeout=0.05)
+        await ctx.shutdown(shutdown_timeout=0.05)
         # Give event loop a tick to process cancellation
         await asyncio.sleep(0.01)
         assert task.cancelled()
@@ -240,7 +240,8 @@ class TestBuildAppContext:
         ):
             ctx = await build_app_context()
         assert ctx.langfuse is not None
-        assert ctx.langfuse.create_config() == {}
+        with ctx.langfuse.trace(user_id=1):
+            pass  # should not raise
         ctx.langfuse.flush()  # should not raise
 
     async def test_episode_manager_gets_db_client(self) -> None:

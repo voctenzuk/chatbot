@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from bot.services.llm_service import (
+from bot.llm.service import (
     LLMResponse,
     LLMService,
     get_llm_service,
@@ -25,20 +25,22 @@ class TestLLMServiceInit:
 
     def test_llm_service_init_defaults_from_settings(self):
         """LLMService() reads model/url/key from settings when no explicit args."""
-        with patch("bot.services.llm_service.settings") as mock_settings:
+        with patch("bot.llm.service.settings") as mock_settings:
             mock_settings.llm_model = "test-model"
             mock_settings.llm_base_url = "https://test.api"
             mock_settings.llm_api_key = "sk-test"
             mock_settings.llm_temperature = 0.5
             mock_settings.llm_max_tokens = 512
 
-            with patch("bot.services.llm_service.ChatOpenAI") as mock_chat:
+            with patch("bot.llm.service.ChatOpenAI") as mock_chat:
                 _svc = LLMService()
+
+            from pydantic import SecretStr
 
             mock_chat.assert_called_once_with(
                 model="test-model",
                 base_url="https://test.api",
-                api_key="sk-test",
+                api_key=SecretStr("sk-test"),
                 temperature=0.5,
                 max_completion_tokens=512,
             )

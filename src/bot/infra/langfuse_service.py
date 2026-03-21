@@ -1,16 +1,22 @@
-"""Langfuse observability service for LLM tracing and cost tracking."""
+"""Langfuse observability service for LLM tracing and cost tracking.
 
-from typing import Any
+Langfuse v4 uses OpenTelemetry-based auto-instrumentation for LangChain.
+Per-request context (user_id, session_id) is propagated via
+``langfuse.propagate_attributes`` which sets OTel span attributes
+on all spans created within the context manager scope.
+"""
 
-from langfuse import Langfuse
-from langfuse.langchain import CallbackHandler
+from collections.abc import Iterator
+from contextlib import contextmanager
+
+from langfuse import Langfuse, propagate_attributes
 from loguru import logger
 
 from bot.config import settings
 
 
 class LangfuseService:
-    """Manages Langfuse tracing via per-request LangChain callback handlers."""
+    """Manages Langfuse tracing via OTel auto-instrumentation (v4+)."""
 
     def __init__(self) -> None:
         self._client = Langfuse(
@@ -20,37 +26,23 @@ class LangfuseService:
         )
         logger.info("LangfuseService initialized (host={})", settings.langfuse_base_url)
 
-    def create_handler(
+    @contextmanager
+    def trace(
         self,
+        *,
         user_id: int,
         session_id: str | None = None,
         trace_name: str = "chat",
         tags: list[str] | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> CallbackHandler:
-        """Create a per-request CallbackHandler for LangChain."""
-        return CallbackHandler(
-            public_key=settings.langfuse_public_key,
-            secret_key=settings.langfuse_secret_key,
-            host=settings.langfuse_base_url,
+    ) -> Iterator[None]:
+        """Set per-request OTel attributes for all spans in this scope."""
+        with propagate_attributes(
             user_id=str(user_id),
             session_id=session_id,
             trace_name=trace_name,
             tags=tags or [],
-            metadata=metadata or {},
-        )
-
-    def create_config(
-        self,
-        user_id: int,
-        session_id: str | None = None,
-        trace_name: str = "chat",
-        tags: list[str] | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Create a config dict for LangChain .ainvoke(config=...)."""
-        handler = self.create_handler(user_id, session_id, trace_name, tags, metadata)
-        return {"callbacks": [handler]}
+        ):
+            yield
 
     def flush(self) -> None:
         """Flush pending events. Call on shutdown."""

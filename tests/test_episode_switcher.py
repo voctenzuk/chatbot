@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from bot.services.episode_switcher import (
+from bot.conversation.episode_switcher import (
     _MAX_ARCHIVED_EPISODES_PER_USER,
     Episode,
     EpisodeConfig,

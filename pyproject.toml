@@ -31,6 +31,7 @@ dependencies = [
   "supabase>=2.0",
   # Math/ML utilities
   "numpy>=1.26",
+  "langchain>=1.2.13",
 ]
 
 [project.optional-dependencies]
@@ -103,9 +104,7 @@ typeCheckingMode = "standard"
 venvPath = "."
 venv = ".venv"
 include = ["src"]
-exclude = [
-    "src/bot/webhooks.py",  # Optional module with heavy dependencies (fastapi, stripe, paddle)
-]
+exclude = []
 useLibraryCodeForTypes = false
 reportMissingTypeStubs = false
 reportUnnecessaryTypeIgnoreComment = "warning"
@@ -124,7 +123,7 @@ markers = [
 [tool.coverage.run]
 source = ["src/bot"]
 branch = true
-omit = ["src/bot/__main__.py", "src/bot/webhooks.py"]
+omit = ["src/bot/__main__.py"]
 
 [tool.coverage.report]
 fail_under = 80

@@ -4,6 +4,7 @@ All external services are mocked: episode_manager, memory_service,
 llm_service, context_builder.
 """
 
+from contextlib import nullcontext
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -138,7 +139,7 @@ def mock_context_builder() -> MagicMock:
 @pytest.fixture
 def mock_langfuse_service() -> MagicMock:
     svc = MagicMock()
-    svc.create_config = MagicMock(return_value={})
+    svc.trace = MagicMock(return_value=nullcontext())
     return svc
 
 

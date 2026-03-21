@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from bot.services.db_client import DatabaseClient, Episode, EpisodeMessage, EpisodeSummary, Thread
+from bot.infra.db_client import DatabaseClient, Episode, EpisodeMessage, EpisodeSummary, Thread
 
 
 @pytest.fixture

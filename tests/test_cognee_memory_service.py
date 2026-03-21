@@ -9,12 +9,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from bot.services.cognee_memory_service import (
+from bot.memory.cognee_service import (
     CogneeMemoryService,
     get_memory_service,
     set_memory_service,
 )
-from bot.services.memory_models import MemoryCategory, MemoryType
+from bot.memory.models import MemoryCategory, MemoryType
 
 
 class TestCogneeMemoryServiceUnit:
@@ -42,9 +42,11 @@ class TestCogneeMemoryServiceUnit:
 
     def test_cognee_not_available_raises(self):
         """Test that RuntimeError is raised when cognee not installed."""
-        with patch("bot.services.cognee_memory_service.COGNEE_AVAILABLE", False):
-            with pytest.raises(RuntimeError, match="cognee package is not installed"):
-                CogneeMemoryService()
+        with (
+            patch("bot.memory.cognee_service.COGNEE_AVAILABLE", False),
+            pytest.raises(RuntimeError, match="cognee package is not installed"),
+        ):
+            CogneeMemoryService()
 
     def test_user_dataset(self, service):
         """Test user dataset name formatting."""
@@ -389,7 +391,7 @@ class TestCogneeMemoryServiceGlobalInstance:
         set_memory_service(custom_service)
         set_memory_service(None)
 
-        with patch("bot.services.cognee_memory_service.CogneeMemoryService") as mock_cls:
+        with patch("bot.memory.cognee_service.CogneeMemoryService") as mock_cls:
             mock_cls.return_value = AsyncMock()
             get_memory_service()
             mock_cls.assert_called_once()

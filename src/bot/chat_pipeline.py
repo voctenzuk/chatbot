@@ -202,82 +202,82 @@ class ChatPipeline:
             generated_images = {}
 
         episode = await self._episode_manager.get_current_episode(user_id)
-        lf_config = self._langfuse.create_config(
+
+        with self._langfuse.trace(
             user_id=user_id,
             session_id=episode.id if episode is not None else None,
             trace_name="chat",
-        )
+        ):
+            # Fetch semantic memories (best-effort)
+            memories: list[Any] = []
+            if self._memory is not None:
+                try:
+                    memories = await self._memory.search(
+                        query=content,
+                        user_id=user_id,
+                        limit=5,
+                    )
+                except Exception as exc:
+                    logger.warning("Memory search failed for user {}: {}", user_id, exc)
 
-        # Fetch semantic memories (best-effort)
-        memories: list[Any] = []
-        if self._memory is not None:
-            try:
-                memories = await self._memory.search(
-                    query=content,
-                    user_id=user_id,
-                    limit=5,
-                )
-            except Exception as exc:
-                logger.warning("Memory search failed for user {}: {}", user_id, exc)
+            # Fetch recent episode messages and convert
+            recent_episode_msgs = await self._episode_manager.get_recent_messages(user_id, limit=20)
+            recent_messages = _episode_messages_to_conversation(recent_episode_msgs)
 
-        # Fetch recent episode messages and convert
-        recent_episode_msgs = await self._episode_manager.get_recent_messages(user_id, limit=20)
-        recent_messages = _episode_messages_to_conversation(recent_episode_msgs)
-
-        # Assemble LLM messages via context builder
-        system_prompt = get_system_prompt(user_name=user_name)
-        llm_messages = self._context_builder.assemble_for_llm(
-            recent_messages=recent_messages,
-            semantic_memories=memories,
-            query=content,
-            system_prompt=system_prompt,
-        )
-
-        # First LLM call (with image tool if available)
-        tools = None
-        if self._image_service is not None:
-            from bot.media.image_service import SEND_PHOTO_TOOL
-
-            tools = [SEND_PHOTO_TOOL]
-
-        llm_response = await self._llm.generate(llm_messages, tools=tools, config=lf_config)
-
-        # Tool execution loop
-        if llm_response.tool_calls and tools:
-            tool_messages: list[dict[str, str]] = []
-            for tc in llm_response.tool_calls:
-                result_text = await self._execute_tool_for_loop(tc, user_id, generated_images)
-                tool_messages.append(
-                    {
-                        "role": "tool",
-                        "content": result_text,
-                        "tool_call_id": tc.id,
-                    }
-                )
-
-            follow_up: list[dict[str, str]] = llm_messages + [
-                {
-                    "role": "assistant",
-                    "content": llm_response.content or "",
-                    "tool_calls": [  # type: ignore[list-item]
-                        {"name": tc.name, "args": tc.args, "id": tc.id}
-                        for tc in llm_response.tool_calls
-                    ],
-                },
-                *tool_messages,
-            ]
-
-            final_response = await self._llm.generate(follow_up, config=lf_config)
-
-            return LLMResponse(
-                content=final_response.content,
-                model=final_response.model,
-                tokens_in=llm_response.tokens_in + final_response.tokens_in,
-                tokens_out=llm_response.tokens_out + final_response.tokens_out,
-                tool_calls=llm_response.tool_calls,
+            # Assemble LLM messages via context builder
+            system_prompt = get_system_prompt(user_name=user_name)
+            llm_messages = self._context_builder.assemble_for_llm(
+                recent_messages=recent_messages,
+                semantic_memories=memories,
+                query=content,
+                system_prompt=system_prompt,
             )
 
-        return llm_response
+            # First LLM call (with image tool if available)
+            tools = None
+            if self._image_service is not None:
+                from bot.media.image_service import SEND_PHOTO_TOOL
+
+                tools = [SEND_PHOTO_TOOL]
+
+            llm_response = await self._llm.generate(llm_messages, tools=tools)
+
+            # Tool execution loop
+            if llm_response.tool_calls and tools:
+                tool_messages: list[dict[str, str]] = []
+                for tc in llm_response.tool_calls:
+                    result_text = await self._execute_tool_for_loop(tc, user_id, generated_images)
+                    tool_messages.append(
+                        {
+                            "role": "tool",
+                            "content": result_text,
+                            "tool_call_id": tc.id,
+                        }
+                    )
+
+                follow_up: list[dict[str, str]] = llm_messages + [
+                    {
+                        "role": "assistant",
+                        "content": llm_response.content or "",
+                        "tool_calls": [  # type: ignore[list-item]
+                            {"name": tc.name, "args": tc.args, "id": tc.id}
+                            for tc in llm_response.tool_calls
+                        ],
+                    },
+                    *tool_messages,
+                ]
+
+                final_response = await self._llm.generate(follow_up)
+
+                return LLMResponse(
+                    content=final_response.content,
+                    model=final_response.model,
+                    tokens_in=llm_response.tokens_in + final_response.tokens_in,
+                    tokens_out=llm_response.tokens_out + final_response.tokens_out,
+                    tool_calls=llm_response.tool_calls,
+                )
+
+            return llm_response
 
     async def _execute_tool_for_loop(
         self,

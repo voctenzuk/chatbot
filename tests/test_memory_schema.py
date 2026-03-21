@@ -544,15 +544,20 @@ class TestSmokeQueries:
             finally:
                 # Cleanup: delete test data in correct order
                 await conn.execute(
-                    "DELETE FROM episode_summaries WHERE episode_id IN (SELECT id FROM episodes WHERE thread_id IN (SELECT id FROM threads WHERE telegram_user_id = $1))",
+                    "DELETE FROM episode_summaries WHERE episode_id IN"
+                    " (SELECT id FROM episodes WHERE thread_id IN"
+                    " (SELECT id FROM threads WHERE telegram_user_id = $1))",
                     test_user_id,
                 )
                 await conn.execute(
-                    "DELETE FROM messages WHERE episode_id IN (SELECT id FROM episodes WHERE thread_id IN (SELECT id FROM threads WHERE telegram_user_id = $1))",
+                    "DELETE FROM messages WHERE episode_id IN"
+                    " (SELECT id FROM episodes WHERE thread_id IN"
+                    " (SELECT id FROM threads WHERE telegram_user_id = $1))",
                     test_user_id,
                 )
                 await conn.execute(
-                    "DELETE FROM episodes WHERE thread_id IN (SELECT id FROM threads WHERE telegram_user_id = $1)",
+                    "DELETE FROM episodes WHERE thread_id IN"
+                    " (SELECT id FROM threads WHERE telegram_user_id = $1)",
                     test_user_id,
                 )
                 await conn.execute("DELETE FROM threads WHERE telegram_user_id = $1", test_user_id)
@@ -607,11 +612,14 @@ class TestSmokeQueries:
             finally:
                 # Cleanup
                 await conn.execute(
-                    "DELETE FROM messages WHERE episode_id IN (SELECT id FROM episodes WHERE thread_id IN (SELECT id FROM threads WHERE telegram_user_id = $1))",
+                    "DELETE FROM messages WHERE episode_id IN"
+                    " (SELECT id FROM episodes WHERE thread_id IN"
+                    " (SELECT id FROM threads WHERE telegram_user_id = $1))",
                     test_user_id,
                 )
                 await conn.execute(
-                    "DELETE FROM episodes WHERE thread_id IN (SELECT id FROM threads WHERE telegram_user_id = $1)",
+                    "DELETE FROM episodes WHERE thread_id IN"
+                    " (SELECT id FROM threads WHERE telegram_user_id = $1)",
                     test_user_id,
                 )
                 await conn.execute("DELETE FROM threads WHERE telegram_user_id = $1", test_user_id)
@@ -648,11 +656,14 @@ class TestSmokeQueries:
             finally:
                 # Cleanup
                 await conn.execute(
-                    "DELETE FROM messages WHERE episode_id IN (SELECT id FROM episodes WHERE thread_id IN (SELECT id FROM threads WHERE telegram_user_id = $1))",
+                    "DELETE FROM messages WHERE episode_id IN"
+                    " (SELECT id FROM episodes WHERE thread_id IN"
+                    " (SELECT id FROM threads WHERE telegram_user_id = $1))",
                     test_user_id,
                 )
                 await conn.execute(
-                    "DELETE FROM episodes WHERE thread_id IN (SELECT id FROM threads WHERE telegram_user_id = $1)",
+                    "DELETE FROM episodes WHERE thread_id IN"
+                    " (SELECT id FROM threads WHERE telegram_user_id = $1)",
                     test_user_id,
                 )
                 await conn.execute("DELETE FROM threads WHERE telegram_user_id = $1", test_user_id)

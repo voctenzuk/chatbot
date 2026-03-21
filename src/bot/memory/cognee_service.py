@@ -34,7 +34,7 @@ try:
     COGNEE_AVAILABLE = True
 except ImportError:
     COGNEE_AVAILABLE = False
-    _cognee_mod = None  # type: ignore[assignment]
+    _cognee_mod = None
 
 
 class CogneeClientProtocol(Protocol):
@@ -64,9 +64,7 @@ class CogneeClient:
         await self._cognee.cognify(datasets=datasets)
 
     async def search(self, query_text: str, datasets: list[str] | None = None) -> list[Any]:
-        return await self._cognee.search(  # type: ignore[no-any-return]
-            query_text, datasets=datasets
-        )
+        return await self._cognee.search(query_text, datasets=datasets)
 
     async def delete_dataset(self, dataset_name: str) -> None:
         # cognee has no dataset-scoped delete API; log a warning instead of wiping all users.

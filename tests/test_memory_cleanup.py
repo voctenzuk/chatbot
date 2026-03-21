@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from bot.services.memory_cleanup import (
+from bot.memory.cleanup import (
     CleanupAction,
     CleanupConfig,
     CleanupReport,
@@ -23,7 +23,7 @@ from bot.services.memory_cleanup import (
     get_cleanup_service,
     set_cleanup_service,
 )
-from bot.services.memory_models import MemoryCategory, MemoryFact, MemoryType
+from bot.memory.models import MemoryCategory, MemoryFact, MemoryType
 
 
 class TestCleanupConfig:
@@ -761,7 +761,7 @@ class TestGlobalInstance:
 
     def test_get_cleanup_service_creates_instance(self):
         """Test that get_cleanup_service creates instance when needed."""
-        with patch("bot.services.memory_cleanup.MemoryCleanupService") as mock_cls:
+        with patch("bot.memory.cleanup.MemoryCleanupService") as mock_cls:
             mock_instance = MagicMock()
             mock_cls.return_value = mock_instance
 
@@ -774,7 +774,7 @@ class TestGlobalInstance:
         """Test that get_cleanup_service passes memory service."""
         mock_memory = MagicMock()
 
-        with patch("bot.services.memory_cleanup.MemoryCleanupService") as mock_cls:
+        with patch("bot.memory.cleanup.MemoryCleanupService") as mock_cls:
             mock_instance = MagicMock()
             mock_cls.return_value = mock_instance
 
@@ -802,7 +802,7 @@ class TestGlobalInstance:
         set_cleanup_service(custom_service)
         set_cleanup_service(None)
 
-        with patch("bot.services.memory_cleanup.MemoryCleanupService") as mock_cls:
+        with patch("bot.memory.cleanup.MemoryCleanupService") as mock_cls:
             mock_cls.return_value = MagicMock()
             get_cleanup_service()
             mock_cls.assert_called_once()
