@@ -1,6 +1,6 @@
 """Tests for ContextBuilder service."""
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -77,7 +77,7 @@ class TestRunningSummary:
 
     def test_is_stale_true(self):
         """Test is_stale returns True for old summary."""
-        old_time = datetime.now() - timedelta(hours=25)
+        old_time = datetime.now(tz=UTC) - timedelta(hours=25)
         summary = RunningSummary(
             content="Old summary",
             timestamp=old_time,
@@ -87,7 +87,7 @@ class TestRunningSummary:
 
     def test_is_stale_false(self):
         """Test is_stale returns False for recent summary."""
-        recent_time = datetime.now() - timedelta(hours=1)
+        recent_time = datetime.now(tz=UTC) - timedelta(hours=1)
         summary = RunningSummary(
             content="Recent summary",
             timestamp=recent_time,
@@ -248,7 +248,7 @@ class TestMemorySorting:
     @pytest.fixture
     def unsorted_memories(self):
         """Create memories with varying importance for sorting tests."""
-        base_time = datetime.now()
+        base_time = datetime.now(tz=UTC)
         return [
             MemoryFact(
                 content="Low importance",

@@ -29,9 +29,9 @@ class DatabaseInitializationError(RuntimeError):
 try:
     from supabase import Client, create_client
 
-    SUPABASE_AVAILABLE = True
+    _supabase_available = True
 except ImportError:
-    SUPABASE_AVAILABLE = False
+    _supabase_available = False
     Client = None
     create_client = None
 
@@ -67,12 +67,8 @@ class Thread:
             active_episode_id=str(row["active_episode_id"])
             if row.get("active_episode_id")
             else None,
-            created_at=datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
-            if row.get("created_at")
-            else None,
-            updated_at=datetime.fromisoformat(row["updated_at"].replace("Z", "+00:00"))
-            if row.get("updated_at")
-            else None,
+            created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
+            updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None,
         )
 
 
@@ -97,24 +93,16 @@ class Episode:
             id=str(row["id"]),
             thread_id=str(row["thread_id"]),
             status=row["status"],
-            started_at=datetime.fromisoformat(row["started_at"].replace("Z", "+00:00"))
+            started_at=datetime.fromisoformat(row["started_at"])
             if row.get("started_at")
             else datetime.now(UTC),
-            ended_at=datetime.fromisoformat(row["ended_at"].replace("Z", "+00:00"))
-            if row.get("ended_at")
-            else None,
+            ended_at=datetime.fromisoformat(row["ended_at"]) if row.get("ended_at") else None,
             topic_label=row.get("topic_label"),
-            last_user_message_at=datetime.fromisoformat(
-                row["last_user_message_at"].replace("Z", "+00:00")
-            )
+            last_user_message_at=datetime.fromisoformat(row["last_user_message_at"])
             if row.get("last_user_message_at")
             else None,
-            created_at=datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
-            if row.get("created_at")
-            else None,
-            updated_at=datetime.fromisoformat(row["updated_at"].replace("Z", "+00:00"))
-            if row.get("updated_at")
-            else None,
+            created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
+            updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None,
         )
 
     @property
@@ -147,9 +135,7 @@ class EpisodeMessage:
             tokens_in=row.get("tokens_in"),
             tokens_out=row.get("tokens_out"),
             model=row.get("model"),
-            created_at=datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
-            if row.get("created_at")
-            else None,
+            created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
         )
 
 
@@ -173,9 +159,7 @@ class EpisodeSummary:
             kind=row["kind"],
             summary_text=row["summary_text"],
             summary_json=row.get("summary_json"),
-            created_at=datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
-            if row.get("created_at")
-            else None,
+            created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
         )
 
 
@@ -216,7 +200,7 @@ class DatabaseClient:
             logger.info("DatabaseClient initialized with custom client")
             return
 
-        if not SUPABASE_AVAILABLE:
+        if not _supabase_available:
             raise RuntimeError(
                 "supabase package is not installed. Install it with: pip install supabase"
             )
@@ -790,7 +774,7 @@ class DatabaseClient:
                 .maybe_single()
                 .execute()
             )
-            return response.data if response.data else None
+            return response.data or None
         except Exception as e:
             logger.error("Failed to get artifact row {}: {}", artifact_id, e)
             return None
@@ -926,7 +910,7 @@ class DatabaseClient:
                 .maybe_single()
                 .execute()
             )
-            return response.data if response.data else None
+            return response.data or None
         except Exception as e:
             logger.error("Failed to get artifact text row {}: {}", text_id, e)
             return None

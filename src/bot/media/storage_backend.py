@@ -5,6 +5,7 @@ with implementations for local filesystem and future S3/Supabase support.
 """
 
 import hashlib
+import os
 import shutil
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -323,22 +324,22 @@ class S3StorageBackend(StorageBackend):
     ) -> StorageReference:
         """Store artifact in S3 (not implemented)."""
         await self._ensure_initialized()
-        raise NotImplementedError()
+        raise NotImplementedError
 
     async def retrieve(self, storage_key: str) -> bytes | None:
         """Retrieve artifact from S3 (not implemented)."""
         await self._ensure_initialized()
-        raise NotImplementedError()
+        raise NotImplementedError
 
     async def delete(self, storage_key: str) -> bool:
         """Delete artifact from S3 (not implemented)."""
         await self._ensure_initialized()
-        raise NotImplementedError()
+        raise NotImplementedError
 
     async def exists(self, storage_key: str) -> bool:
         """Check if artifact exists in S3 (not implemented)."""
         await self._ensure_initialized()
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def get_public_url(self, storage_key: str) -> str | None:
         """Get public URL for S3 object (not implemented)."""
@@ -360,8 +361,6 @@ def get_storage_backend() -> StorageBackend:
     """
     global _storage_backend
     if _storage_backend is None:
-        import os
-
         provider = os.getenv("ARTIFACT_STORAGE_PROVIDER", "local").lower()
 
         if provider == "s3":

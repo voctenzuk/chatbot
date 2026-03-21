@@ -1,7 +1,7 @@
 """Enhanced memory models for living bot experience."""
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -79,8 +79,8 @@ class MemoryFact:
     # Core metadata
     metadata: dict[str, Any] = field(default_factory=dict)
     fact_id: str = ""
-    timestamp: datetime = field(default_factory=datetime.now)
-    last_accessed: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
+    last_accessed: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
     access_count: int = 0
 
     # Importance & Decay
@@ -108,12 +108,12 @@ class MemoryFact:
     def is_expired(self) -> bool:
         """Check if memory has expired."""
         if self.expiration_date:
-            return datetime.now() > self.expiration_date
+            return datetime.now(tz=UTC) > self.expiration_date
         return False
 
     def get_effective_importance(self) -> float:
         """Calculate current importance considering decay."""
-        days_since_creation = (datetime.now() - self.timestamp).days
+        days_since_creation = (datetime.now(tz=UTC) - self.timestamp).days
         decayed = self.importance_score * (1 - self.decay_rate) ** max(days_since_creation, 0)
         # Boost for frequently accessed memories
         access_boost = min(self.access_count * 0.05, 0.3)

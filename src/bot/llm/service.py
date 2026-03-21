@@ -95,16 +95,15 @@ class LLMService:
         meta: dict[str, Any] = getattr(result, "response_metadata", {}) or {}
 
         # Extract tool calls if present
-        parsed_tool_calls: list[ToolCall] = []
         raw_tool_calls = getattr(result, "tool_calls", None) or []
-        for tc in raw_tool_calls:
-            parsed_tool_calls.append(
-                ToolCall(
-                    name=tc.get("name", ""),
-                    args=tc.get("args", {}),
-                    id=tc.get("id", ""),
-                )
+        parsed_tool_calls: list[ToolCall] = [
+            ToolCall(
+                name=tc.get("name", ""),
+                args=tc.get("args", {}),
+                id=tc.get("id", ""),
             )
+            for tc in raw_tool_calls
+        ]
 
         return LLMResponse(
             content=str(result.content),

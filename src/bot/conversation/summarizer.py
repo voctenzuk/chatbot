@@ -555,15 +555,14 @@ class Summarizer:
 
     def _validate_summary_json(self, summary: SummaryJSON) -> SummaryJSON:
         """Validate and sanitize parsed summary to prevent memory poisoning."""
-        validated_facts = []
-        for fact in summary.facts_candidates[: self.config.max_facts_per_summary]:
-            validated_facts.append(
-                FactCandidate(
-                    text=fact.text[:500],
-                    confidence=max(0.0, min(1.0, fact.confidence)),
-                    category=fact.category[:50] if fact.category else "general",
-                )
+        validated_facts = [
+            FactCandidate(
+                text=fact.text[:500],
+                confidence=max(0.0, min(1.0, fact.confidence)),
+                category=fact.category[:50] if fact.category else "general",
             )
+            for fact in summary.facts_candidates[: self.config.max_facts_per_summary]
+        ]
         summary.facts_candidates = validated_facts
         summary.topic = summary.topic[:200] if summary.topic else ""
         return summary

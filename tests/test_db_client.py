@@ -4,7 +4,7 @@ These tests validate the DB client glue code against a lightweight mock
 Supabase client (rpc/table builders).
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -38,8 +38,8 @@ def mock_supabase_client() -> MagicMock:
                 "id": tid,
                 "telegram_user_id": user_id,
                 "active_episode_id": None,
-                "created_at": datetime.now().isoformat(),
-                "updated_at": datetime.now().isoformat(),
+                "created_at": datetime.now(tz=UTC).isoformat(),
+                "updated_at": datetime.now(tz=UTC).isoformat(),
             }
             result.execute = MagicMock(return_value=MagicMock(data=tid))
             return result
@@ -53,12 +53,12 @@ def mock_supabase_client() -> MagicMock:
                 "id": eid,
                 "thread_id": thread_id,
                 "status": "active",
-                "started_at": datetime.now().isoformat(),
+                "started_at": datetime.now(tz=UTC).isoformat(),
                 "ended_at": None,
                 "topic_label": topic_label,
                 "last_user_message_at": None,
-                "created_at": datetime.now().isoformat(),
-                "updated_at": datetime.now().isoformat(),
+                "created_at": datetime.now(tz=UTC).isoformat(),
+                "updated_at": datetime.now(tz=UTC).isoformat(),
             }
             threads[thread_id]["active_episode_id"] = eid
             result.execute = MagicMock(return_value=MagicMock(data=eid))
@@ -82,8 +82,8 @@ def mock_supabase_client() -> MagicMock:
                     "id": thread_id,
                     "telegram_user_id": user_id,
                     "active_episode_id": None,
-                    "created_at": datetime.now().isoformat(),
-                    "updated_at": datetime.now().isoformat(),
+                    "created_at": datetime.now(tz=UTC).isoformat(),
+                    "updated_at": datetime.now(tz=UTC).isoformat(),
                 }
 
             episode_id = threads[thread_id].get("active_episode_id")
@@ -94,12 +94,12 @@ def mock_supabase_client() -> MagicMock:
                     "id": episode_id,
                     "thread_id": thread_id,
                     "status": "active",
-                    "started_at": datetime.now().isoformat(),
+                    "started_at": datetime.now(tz=UTC).isoformat(),
                     "ended_at": None,
                     "topic_label": None,
                     "last_user_message_at": None,
-                    "created_at": datetime.now().isoformat(),
-                    "updated_at": datetime.now().isoformat(),
+                    "created_at": datetime.now(tz=UTC).isoformat(),
+                    "updated_at": datetime.now(tz=UTC).isoformat(),
                 }
                 threads[thread_id]["active_episode_id"] = episode_id
 
@@ -113,10 +113,10 @@ def mock_supabase_client() -> MagicMock:
                 "tokens_in": params.get("p_tokens_in"),
                 "tokens_out": params.get("p_tokens_out"),
                 "model": params.get("p_model"),
-                "created_at": datetime.now().isoformat(),
+                "created_at": datetime.now(tz=UTC).isoformat(),
             }
             if role == "user":
-                episodes[episode_id]["last_user_message_at"] = datetime.now().isoformat()
+                episodes[episode_id]["last_user_message_at"] = datetime.now(tz=UTC).isoformat()
 
             result.execute = MagicMock(return_value=MagicMock(data=mid))
             return result
@@ -159,7 +159,7 @@ def mock_supabase_client() -> MagicMock:
                 "kind": kind,
                 "summary_text": params["p_summary_text"],
                 "summary_json": params.get("p_summary_json"),
-                "created_at": datetime.now().isoformat(),
+                "created_at": datetime.now(tz=UTC).isoformat(),
             }
             result.execute = MagicMock(return_value=MagicMock(data=sid))
             return result
@@ -309,7 +309,7 @@ async def test_normalize_message_row_unit():
         "episode_id": "ep_xyz789",
         "role": "user",
         "content_text": "Hello",
-        "created_at": datetime.now().isoformat(),
+        "created_at": datetime.now(tz=UTC).isoformat(),
     }
 
     # Normalize the row

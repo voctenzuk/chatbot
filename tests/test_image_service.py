@@ -2,7 +2,7 @@
 
 import base64
 from contextlib import nullcontext
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -67,7 +67,7 @@ class TestImageServiceGenerate:
 
     @pytest.mark.asyncio
     async def test_generate_rate_limited(self, service: Any) -> None:
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = datetime.now(tz=UTC).strftime("%Y-%m-%d")
         service._send_counts[123] = {today: 5}
         result = await service.generate("test", user_id=123)
         assert result is None

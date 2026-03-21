@@ -12,8 +12,10 @@ from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 
+from bot.conversation.episode_switcher import Episode as InMemoryEpisode
 from bot.conversation.episode_switcher import (
     EpisodeConfig,
+    Message,
     SwitchDecision,
 )
 from bot.conversation.episode_switcher import (
@@ -124,10 +126,6 @@ class EpisodeManager:
         # Get messages for this episode to seed the in-memory state
         messages = await self.db.get_messages_for_episode(episode.id, limit=50)
 
-        # Import here to avoid circular imports
-        from bot.conversation.episode_switcher import Episode as InMemoryEpisode
-        from bot.conversation.episode_switcher import Message
-
         # Create in-memory episode
         in_memory_episode = InMemoryEpisode(
             episode_id=episode.id,
@@ -146,7 +144,7 @@ class EpisodeManager:
         )
 
         # Seed the in-memory manager
-        self._in_memory_manager._current_episode[user_id] = in_memory_episode
+        self._in_memory_manager.set_current_episode(user_id, in_memory_episode)
 
         logger.debug(
             "Seeded in-memory state for user {} from DB episode {} ({} messages)",
@@ -175,7 +173,7 @@ class EpisodeManager:
 
         # Check if we need to seed in-memory state from DB
         # This prevents unnecessary episode splits after restart when DB has active episode
-        if self._in_memory_manager._current_episode.get(user_id) is None and self.db:
+        if self._in_memory_manager.get_current_episode(user_id) is None and self.db:
             await self._seed_in_memory_state_from_db(user_id)
 
         # Get last message time from database
@@ -362,7 +360,7 @@ class EpisodeManager:
             closed = await self.db.close_episode(episode.id)
 
             # Clear in-memory state so next message starts fresh
-            self._in_memory_manager._current_episode.pop(user_id, None)
+            self._in_memory_manager.set_current_episode(user_id, None)
 
             logger.info("Closed episode {} for user {}", episode.id, user_id)
             return closed

@@ -7,11 +7,13 @@ This module provides automatic episode switching based on:
 """
 
 import math
+import re
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
+import numpy as np
 from langchain_openai import OpenAIEmbeddings
 from loguru import logger
 
@@ -38,8 +40,6 @@ class SimpleEmbeddingProvider:
 
     def _tokenize(self, text: str) -> list[str]:
         """Simple tokenization (lowercase, split on whitespace/punctuation)."""
-        import re
-
         return re.findall(r"\b\w+\b", text.lower())
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
@@ -201,22 +201,20 @@ class EpisodeManager:
     def _generate_episode_id(self) -> str:
         """Generate a unique episode ID."""
         self._episode_counter += 1
-        return f"ep_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{self._episode_counter}"
+        return f"ep_{datetime.now(tz=UTC).strftime('%Y%m%d_%H%M%S')}_{self._episode_counter}"
 
     def _get_recent_switch_count(self, user_id: int, window_hours: float = 1.0) -> int:
         """Count recent episode switches for anti-flap."""
         if user_id not in self._switch_history:
             return 0
 
-        cutoff = datetime.now() - timedelta(hours=window_hours)
+        cutoff = datetime.now(tz=UTC) - timedelta(hours=window_hours)
         recent = [t for t in self._switch_history[user_id] if t > cutoff]
         self._switch_history[user_id] = recent  # Clean up old entries
         return len(recent)
 
     def _cosine_similarity(self, a: list[float], b: list[float]) -> float:
         """Compute cosine similarity between two vectors."""
-        import numpy as np
-
         vec_a = np.array(a)
         vec_b = np.array(b)
         norm_a = np.linalg.norm(vec_a)
@@ -307,7 +305,7 @@ class EpisodeManager:
         Returns:
             SwitchDecision with should_switch and reasoning
         """
-        current_time = timestamp or datetime.now()
+        current_time = timestamp or datetime.now(tz=UTC)
 
         # Anti-flap: Check rate limiting
         recent_switches = self._get_recent_switch_count(user_id)
@@ -419,7 +417,7 @@ class EpisodeManager:
         Returns:
             Tuple of (Message, SwitchDecision)
         """
-        current_time = timestamp or datetime.now()
+        current_time = timestamp or datetime.now(tz=UTC)
 
         # Evaluate switch
         decision = await self.evaluate_switch(user_id, content, current_time)
@@ -493,6 +491,13 @@ class EpisodeManager:
         )
 
         return episode
+
+    def set_current_episode(self, user_id: int, episode: Episode | None) -> None:
+        """Set (or clear) the current episode for a user."""
+        if episode is None:
+            self._current_episode.pop(user_id, None)
+        else:
+            self._current_episode[user_id] = episode
 
     def get_current_episode(self, user_id: int) -> Episode | None:
         """Get the current episode for a user."""

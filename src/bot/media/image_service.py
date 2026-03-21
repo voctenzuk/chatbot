@@ -20,7 +20,7 @@ Architecture (tool calling):
 """
 
 import base64
-from datetime import datetime
+from datetime import UTC, datetime
 
 from loguru import logger
 
@@ -29,9 +29,9 @@ from bot.config import settings
 try:
     from openai import AsyncOpenAI
 
-    OPENAI_AVAILABLE = True
+    _openai_available = True
 except ImportError:
-    OPENAI_AVAILABLE = False
+    _openai_available = False
     AsyncOpenAI = None
 
 _MAX_IMAGES_PER_DAY = 5
@@ -72,7 +72,7 @@ class ImageService:
         self._send_counts: dict[int, dict[str, int]] = {}
         self._model = settings.image_model
 
-        if not OPENAI_AVAILABLE:
+        if not _openai_available:
             self._client = None
             logger.warning("ImageService: openai package not installed")
             return
@@ -96,13 +96,13 @@ class ImageService:
 
     def _check_rate_limit(self, user_id: int) -> bool:
         """Return True if user can receive more images today."""
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = datetime.now(tz=UTC).strftime("%Y-%m-%d")
         user_counts = self._send_counts.get(user_id, {})
         return user_counts.get(today, 0) < _MAX_IMAGES_PER_DAY
 
     def _record_send(self, user_id: int) -> None:
         """Record that an image was generated for user."""
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = datetime.now(tz=UTC).strftime("%Y-%m-%d")
         if user_id not in self._send_counts:
             self._send_counts[user_id] = {}
         self._send_counts[user_id][today] = self._send_counts[user_id].get(today, 0) + 1

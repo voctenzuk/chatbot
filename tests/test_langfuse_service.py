@@ -29,14 +29,14 @@ class TestLangfuseServiceInit:
         ):
             mock_settings.langfuse_enabled = True
             mock_settings.langfuse_public_key = "pk-test"
-            mock_settings.langfuse_secret_key = "sk-test"
+            mock_settings.langfuse_secret_key = "sk-test"  # noqa: S105
             mock_settings.langfuse_base_url = "https://cloud.langfuse.com"
 
             LangfuseService()
 
             mock_langfuse.assert_called_once_with(
                 public_key="pk-test",
-                secret_key="sk-test",
+                secret_key="sk-test",  # noqa: S106
                 host="https://cloud.langfuse.com",
             )
 
@@ -52,7 +52,7 @@ class TestTrace:
             patch("bot.infra.langfuse_service.propagate_attributes") as mock_prop,
         ):
             mock_settings.langfuse_public_key = "pk-test"
-            mock_settings.langfuse_secret_key = "sk-test"
+            mock_settings.langfuse_secret_key = "sk-test"  # noqa: S105
             mock_settings.langfuse_base_url = "https://cloud.langfuse.com"
 
             svc = LangfuseService()
@@ -79,7 +79,7 @@ class TestTrace:
             patch("bot.infra.langfuse_service.propagate_attributes") as mock_prop,
         ):
             mock_settings.langfuse_public_key = "pk-test"
-            mock_settings.langfuse_secret_key = "sk-test"
+            mock_settings.langfuse_secret_key = "sk-test"  # noqa: S105
             mock_settings.langfuse_base_url = "https://cloud.langfuse.com"
 
             svc = LangfuseService()
@@ -98,7 +98,7 @@ class TestTrace:
             patch("bot.infra.langfuse_service.propagate_attributes") as mock_prop,
         ):
             mock_settings.langfuse_public_key = "pk-test"
-            mock_settings.langfuse_secret_key = "sk-test"
+            mock_settings.langfuse_secret_key = "sk-test"  # noqa: S105
             mock_settings.langfuse_base_url = "https://cloud.langfuse.com"
 
             svc = LangfuseService()
@@ -124,7 +124,7 @@ class TestFlush:
         ):
             mock_settings.langfuse_enabled = True
             mock_settings.langfuse_public_key = "pk-test"
-            mock_settings.langfuse_secret_key = "sk-test"
+            mock_settings.langfuse_secret_key = "sk-test"  # noqa: S105
             mock_settings.langfuse_base_url = "https://cloud.langfuse.com"
 
             mock_client = MagicMock()
@@ -148,7 +148,7 @@ class TestSingleton:
         ):
             mock_settings.langfuse_enabled = True
             mock_settings.langfuse_public_key = "pk-test"
-            mock_settings.langfuse_secret_key = "sk-test"
+            mock_settings.langfuse_secret_key = "sk-test"  # noqa: S105
             mock_settings.langfuse_base_url = "https://cloud.langfuse.com"
 
             custom = LangfuseService()

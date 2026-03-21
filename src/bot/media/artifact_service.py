@@ -7,8 +7,9 @@ This module provides the ArtifactService class for:
 - Context building support for artifact surrogates
 """
 
+import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, BinaryIO, Self
 
@@ -105,12 +106,8 @@ class Artifact:
             original_filename=row.get("original_filename"),
             processing_status=ArtifactProcessingStatus(row.get("processing_status", "pending")),
             processing_error=row.get("processing_error"),
-            created_at=datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
-            if row.get("created_at")
-            else None,
-            updated_at=datetime.fromisoformat(row["updated_at"].replace("Z", "+00:00"))
-            if row.get("updated_at")
-            else None,
+            created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
+            updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None,
         )
 
 
@@ -161,9 +158,7 @@ class ArtifactText:
             embedding=row.get("embedding"),
             confidence=row.get("confidence"),
             model_used=row.get("model_used"),
-            created_at=datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
-            if row.get("created_at")
-            else None,
+            created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
         )
 
 
@@ -299,10 +294,7 @@ class ArtifactService:
                 ),
             )
 
-        # Store the file
-        # Generate a temporary artifact ID for storage path
-        import uuid
-
+        # Store the file — generate a temporary artifact ID for storage path
         temp_artifact_id = str(uuid.uuid4())
         storage_ref = await self._storage.store(
             data=request.data,
@@ -414,9 +406,11 @@ class ArtifactService:
                 text_surrogates = []
                 surrogates_data = row.get("text_surrogates", [])
                 if surrogates_data and surrogates_data != [{}]:
-                    for surrogate_data in surrogates_data:
-                        if surrogate_data and "text_kind" in surrogate_data:
-                            text_surrogates.append(ArtifactText.from_row(surrogate_data))
+                    text_surrogates.extend(
+                        ArtifactText.from_row(surrogate_data)
+                        for surrogate_data in surrogates_data
+                        if surrogate_data and "text_kind" in surrogate_data
+                    )
 
                 results.append((artifact, text_surrogates))
 
@@ -502,7 +496,7 @@ class ArtifactService:
         Returns:
             Updated Artifact.
         """
-        updates: dict[str, Any] = {"updated_at": datetime.now().isoformat()}
+        updates: dict[str, Any] = {"updated_at": datetime.now(tz=UTC).isoformat()}
         if thread_id:
             updates["thread_id"] = thread_id
         if episode_id:
@@ -737,7 +731,7 @@ class ArtifactService:
         try:
             updates: dict[str, Any] = {
                 "processing_status": status.value,
-                "updated_at": datetime.now().isoformat(),
+                "updated_at": datetime.now(tz=UTC).isoformat(),
             }
             if error:
                 updates["processing_error"] = error
@@ -774,18 +768,17 @@ class ArtifactService:
                 episode_id, max_per_artifact, max_total
             )
 
-            results = []
-            for row in rows:
-                results.append(
-                    TextSurrogateForContext(
-                        artifact_id=str(row["artifact_id"]),
-                        artifact_type=ArtifactType(row["artifact_type"]),
-                        original_filename=row.get("original_filename"),
-                        text_kind=TextSurrogateKind(row["text_kind"]),
-                        text_content=row["text_content"],
-                        chunk_info=row.get("chunk_info"),
-                    )
+            results = [
+                TextSurrogateForContext(
+                    artifact_id=str(row["artifact_id"]),
+                    artifact_type=ArtifactType(row["artifact_type"]),
+                    original_filename=row.get("original_filename"),
+                    text_kind=TextSurrogateKind(row["text_kind"]),
+                    text_content=row["text_content"],
+                    chunk_info=row.get("chunk_info"),
                 )
+                for row in rows
+            ]
 
             return results
         except Exception as e:

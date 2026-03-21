@@ -1,7 +1,7 @@
 """Tests for proactive messaging scheduler."""
 
 from contextlib import nullcontext
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -137,15 +137,15 @@ class TestProactiveSchedulerCore:
     def test_quiet_hours_at_2am(self, scheduler):
         """2:00 AM is quiet hours."""
         with patch("bot.adapters.proactive_scheduler.datetime") as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 3, 19, 2, 0)
-            mock_dt.side_effect = lambda *a, **k: datetime(*a, **k)
+            mock_dt.now.return_value = datetime(2026, 3, 19, 2, 0, tzinfo=UTC)
+            mock_dt.side_effect = lambda *a, **k: datetime(*a, **k)  # noqa: DTZ001
             assert scheduler._is_quiet_hours() is True
 
     def test_quiet_hours_at_10am(self, scheduler):
         """10:00 AM is not quiet hours."""
         with patch("bot.adapters.proactive_scheduler.datetime") as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 3, 19, 10, 0)
-            mock_dt.side_effect = lambda *a, **k: datetime(*a, **k)
+            mock_dt.now.return_value = datetime(2026, 3, 19, 10, 0, tzinfo=UTC)
+            mock_dt.side_effect = lambda *a, **k: datetime(*a, **k)  # noqa: DTZ001
             assert scheduler._is_quiet_hours() is False
 
 
@@ -183,7 +183,7 @@ class TestProactiveSchedulerTriggers:
         """Idle check only messages users silent for >6 hours."""
         scheduler._get_active_user_ids = AsyncMock(return_value=[111, 222])
 
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
 
         async def mock_last_msg(uid):
             if uid == 111:

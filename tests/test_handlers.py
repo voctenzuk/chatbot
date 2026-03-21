@@ -97,8 +97,8 @@ def mock_pipeline() -> MagicMock:
     episode_manager = AsyncMock()
     episode_manager.process_user_message = AsyncMock(return_value=_make_message_result())
     episode_manager.process_assistant_message = AsyncMock(return_value=_make_message_result())
-    pipeline._episode_manager = episode_manager
-    pipeline._db_client = None
+    pipeline.episode_manager = episode_manager
+    pipeline.db_client = None
 
     # Mock handle_message for chat handler
     pipeline.handle_message = AsyncMock(
@@ -119,11 +119,11 @@ class TestStartHandler:
         await start(message, pipeline=mock_pipeline)  # type: ignore[arg-type]
 
         # Should persist user message and assistant response
-        assert mock_pipeline._episode_manager.process_user_message.call_count == 1
-        assert mock_pipeline._episode_manager.process_assistant_message.call_count == 1
+        assert mock_pipeline.episode_manager.process_user_message.call_count == 1
+        assert mock_pipeline.episode_manager.process_assistant_message.call_count == 1
 
         # Check user message
-        first_call = mock_pipeline._episode_manager.process_user_message.call_args
+        first_call = mock_pipeline.episode_manager.process_user_message.call_args
         assert first_call.kwargs["user_id"] == 12345
         assert first_call.kwargs["content"] == "/start"
 
@@ -136,14 +136,14 @@ class TestStartHandler:
         await start(message, pipeline=mock_pipeline)  # type: ignore[arg-type]
 
         # Should still work with user_id=0
-        first_call = mock_pipeline._episode_manager.process_user_message.call_args
+        first_call = mock_pipeline.episode_manager.process_user_message.call_args
         assert first_call.kwargs["user_id"] == 0
 
     @pytest.mark.asyncio
     async def test_start_provisions_user_when_db_available(self, mock_pipeline: MagicMock) -> None:
         """Test that /start provisions user in DB when available."""
         mock_db = AsyncMock()
-        mock_pipeline._db_client = mock_db
+        mock_pipeline.db_client = mock_db
 
         message = MockMessage(text="/start", user_id=12345)
         await start(message, pipeline=mock_pipeline)  # type: ignore[arg-type]
@@ -153,7 +153,7 @@ class TestStartHandler:
     @pytest.mark.asyncio
     async def test_start_handles_db_unavailable(self, mock_pipeline: MagicMock) -> None:
         """Test that start handler informs user when DB is unavailable."""
-        mock_pipeline._episode_manager.process_user_message = AsyncMock(
+        mock_pipeline.episode_manager.process_user_message = AsyncMock(
             side_effect=RuntimeError("Database client not configured")
         )
 
@@ -239,14 +239,14 @@ class TestExtractMessageContent:
     def test_text_message(self) -> None:
         """Test extracting content - text messages bypass this function."""
         message = MockMessage(text="")
-        result = _extract_message_content(cast(Message, message))
+        result = _extract_message_content(cast("Message", message))
         assert result == "[Non-text message]"
 
     def test_photo_with_caption(self) -> None:
         """Test extracting content from photo with caption."""
         message = MockMessage(caption="My vacation photo")
         message.photo = [MagicMock()]
-        result = _extract_message_content(cast(Message, message))
+        result = _extract_message_content(cast("Message", message))
         assert "[Caption: My vacation photo]" in result
         assert "[Photo attached]" in result
 
@@ -254,69 +254,69 @@ class TestExtractMessageContent:
         """Test extracting content from document."""
         message = MockMessage()
         message.document = MagicMock(file_name="report.pdf")
-        result = _extract_message_content(cast(Message, message))
+        result = _extract_message_content(cast("Message", message))
         assert "[Document: report.pdf]" in result
 
     def test_voice_message(self) -> None:
         """Test extracting content from voice message."""
         message = MockMessage()
         message.voice = MagicMock()
-        result = _extract_message_content(cast(Message, message))
+        result = _extract_message_content(cast("Message", message))
         assert "[Voice message]" in result
 
     def test_video(self) -> None:
         """Test extracting content from video."""
         message = MockMessage()
         message.video = MagicMock()
-        result = _extract_message_content(cast(Message, message))
+        result = _extract_message_content(cast("Message", message))
         assert "[Video attached]" in result
 
     def test_audio(self) -> None:
         """Test extracting content from audio."""
         message = MockMessage()
         message.audio = MagicMock()
-        result = _extract_message_content(cast(Message, message))
+        result = _extract_message_content(cast("Message", message))
         assert "[Audio attached]" in result
 
     def test_sticker(self) -> None:
         """Test extracting content from sticker."""
         message = MockMessage()
         message.sticker = MagicMock(emoji="😊")
-        result = _extract_message_content(cast(Message, message))
+        result = _extract_message_content(cast("Message", message))
         assert "[Sticker: 😊]" in result
 
     def test_location(self) -> None:
         """Test extracting content from location."""
         message = MockMessage()
         message.location = MagicMock(latitude=51.5074, longitude=-0.1278)
-        result = _extract_message_content(cast(Message, message))
+        result = _extract_message_content(cast("Message", message))
         assert "[Location: 51.5074, -0.1278]" in result
 
     def test_contact(self) -> None:
         """Test extracting content from contact."""
         message = MockMessage()
         message.contact = MagicMock(first_name="John")
-        result = _extract_message_content(cast(Message, message))
+        result = _extract_message_content(cast("Message", message))
         assert "[Contact: John]" in result
 
     def test_sticker_without_emoji(self) -> None:
         """Test extracting content from sticker without emoji."""
         message = MockMessage()
         message.sticker = MagicMock(emoji=None)
-        result = _extract_message_content(cast(Message, message))
+        result = _extract_message_content(cast("Message", message))
         assert "[Sticker: emoji]" in result
 
     def test_contact_without_name(self) -> None:
         """Test extracting content from contact without name."""
         message = MockMessage()
         message.contact = MagicMock(first_name=None)
-        result = _extract_message_content(cast(Message, message))
+        result = _extract_message_content(cast("Message", message))
         assert "[Contact: unnamed]" in result
 
     def test_empty_message(self) -> None:
         """Test extracting content from empty message."""
         message = MockMessage()
-        result = _extract_message_content(cast(Message, message))
+        result = _extract_message_content(cast("Message", message))
         assert result == "[Non-text message]"
 
     def test_multiple_attachments(self) -> None:
@@ -324,7 +324,7 @@ class TestExtractMessageContent:
         message = MockMessage(caption="Check this out")
         message.photo = [MagicMock()]
         message.document = MagicMock(file_name="file.txt")
-        result = _extract_message_content(cast(Message, message))
+        result = _extract_message_content(cast("Message", message))
         assert "[Caption: Check this out]" in result
         assert "[Photo attached]" in result
         assert "[Document: file.txt]" in result

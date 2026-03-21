@@ -236,7 +236,7 @@ class TestChatLLMIntegration:
         ):
             await chat(msg, pipeline=pipeline)  # type: ignore[arg-type]
 
-        call_kwargs = pipeline._episode_manager.process_assistant_message.call_args.kwargs
+        call_kwargs = pipeline.episode_manager.process_assistant_message.call_args.kwargs
         assert call_kwargs["tokens_in"] == 15
         assert call_kwargs["tokens_out"] == 8
         assert call_kwargs["model"] == "test-model"
@@ -446,8 +446,8 @@ class TestStartHandlerUnchanged:
         from bot.handlers import start
 
         mock_pipeline = MagicMock(spec=ChatPipeline)
-        mock_pipeline._episode_manager = mock_episode_manager
-        mock_pipeline._db_client = None
+        mock_pipeline.episode_manager = mock_episode_manager
+        mock_pipeline.db_client = None
 
         msg = MockMessage(text="/start", user_id=42)
         await start(msg, pipeline=mock_pipeline)  # type: ignore[arg-type]
