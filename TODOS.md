@@ -5,18 +5,17 @@
 ### Unit Economics Validation
 **What:** Проверить реальную цену kimi-k2p5 за токен против констант COST_PER_1M_INPUT/OUTPUT в `chat_pipeline.py`. После 1 недели данных — проанализировать cost_cents и скорректировать тиеры/лимиты.
 **Why:** При оценочных ценах даже Pro тиер ($9.99) может быть убыточным. Нужны реальные данные для правильного прайсинга.
-**Context:** `cost_cents NUMERIC(10,4)` уже трекается в `usage_tracking` (миграция 008). Константы: `COST_PER_1M_INPUT=0.15`, `COST_PER_1M_OUTPUT=0.60`, `IMAGE_COST_CENTS=5.0`. После накопления данных — сравнить с реальными API счетами.
+**Context:** `cost_cents NUMERIC(10,4)` уже трекается в `usage_tracking` (миграция 008). Константы: `COST_PER_1M_INPUT=0.15`, `COST_PER_1M_OUTPUT=0.60`. Image cost теперь приходит из `ImageResult.cost_cents` (по провайдеру). После накопления данных — сравнить с реальными API счетами (OpenRouter + kimi-k2p5).
 **Effort:** S (ручной анализ данных после 1 недели)
 **Depends on:** Character MVP (завершён)
 
 ## P2 — Important
 
-### Image Consistency Evaluation
-**What:** Оценить consistency внешности gpt-image-1 с appearance prefix после 50+ сгенерированных фото. Если <70% визуальной consistency — исследовать reference image подходы (Flux с IP-Adapter и т.д.).
-**Why:** Appearance prefix в промпте даёт ~70-80% consistency по оценкам, но это не проверено на реальных данных. Консистентная внешность — core differentiator продукта.
-**Context:** `ImageService.generate()` prepend'ит `CharacterConfig.appearance_en` к каждому промпту. Текущая строка: "Young woman, 24 years old, shoulder-length dark brown hair...". Альтернативы: Flux с reference image, DALL-E с style reference.
-**Effort:** S (ручная оценка после 50+ фото)
-**Depends on:** Character MVP (завершён)
+### OpenRouter Image Cost Monitoring
+**What:** После 1 недели с FLUX/SeeDream, сравнить tracked `cost_cents` (provider из `ImageResult`) с реальным OpenRouter биллингом. Настроить spend alerts.
+**Why:** Новая внешняя API зависимость с per-image cost. При вирусном росте или abuse spend может резко вырасти.
+**Effort:** S (ручной анализ + OpenRouter dashboard)
+**Depends on:** Reference Images feature + 1 неделя данных
 
 ### Relationship Levels (Gamification)
 **What:** Использовать `relationship_depth` (0-10) из `memory_models.py`. По мере общения уровень растёт → бот становится теплее, отправляет больше фото, пишет чаще первым.
@@ -40,6 +39,12 @@
 **Context:** `ProactiveScheduler` всё ещё использует `get_*()` внутри методов. Нужно сначала рефакторить его на constructor injection, затем можно удалить все `get_*()/set_*()`.
 **Effort:** S (CC ~15 min)
 **Depends on:** Composition Root рефакторинг (завершён) + рефакторинг ProactiveScheduler
+
+### Sprite Expansion Pipeline
+**What:** Упростить добавление новых emotion sprites. Сейчас: сгенерировать через скрипт, загрузить в Supabase, обновить `SPRITE_EMOTIONS`, редеплой.
+**Why:** Если пользователи просят эмоции не из набора (angry, sleepy, excited), turnaround медленный (code change + deploy).
+**Effort:** S (CC ~15 min для admin скрипта)
+**Depends on:** Reference Images feature
 
 ### Scaling Path Documentation
 **What:** Документ с конкретными триггерами масштабирования: 100+ DAU → webhooks, 500+ DAU → отдельный proactive worker, 1000+ DAU → mem0 worker.
