@@ -27,11 +27,32 @@ git clone <repo-url> && cd chatbot
 uv sync
 
 # 2. Configure
-cp .env.example .env  # or create .env manually (see Environment below)
+cp .env.example .env   # edit with your API keys (see Environment below)
 
-# 3. Run
+# 3. (Optional) Import a character card from SillyTavern
+uv run python -m bot.tools.import_card path/to/card.png
+# → copy output into src/bot/character.py (see docs/CHARACTER_SETUP.md)
+
+# 4. Run
 uv run bot
 ```
+
+## Launch checklist
+
+Минимум для запуска:
+
+- [ ] `TELEGRAM_BOT_TOKEN` — от [@BotFather](https://t.me/BotFather)
+- [ ] `LLM_API_KEY` — ключ [OpenRouter](https://openrouter.ai/) (или другого OpenAI-совместимого провайдера)
+- [ ] `uv sync` — установить зависимости
+- [ ] `uv run bot` — бот запускается и отвечает на `/start`
+
+Для полного функционала:
+
+- [ ] `SUPABASE_URL` + `SUPABASE_SERVICE_KEY` — для сохранения сообщений, подписок, usage tracking
+- [ ] `IMAGE_API_KEY` — для генерации фото (OpenRouter, модель SeeDream 4.5)
+- [ ] `MEM0_API_KEY` — для долгосрочной памяти (бот запоминает факты о пользователе)
+- [ ] Применить миграции в Supabase (`supabase_migrations/001..010`)
+- [ ] Настроить персонажа — см. [docs/CHARACTER_SETUP.md](docs/CHARACTER_SETUP.md)
 
 ## Environment
 
@@ -101,7 +122,21 @@ src/bot/
     media/               # Image generation (with appearance prefix), artifacts, storage
     infra/               # Database client, Langfuse observability
     adapters/            # Telegram delivery, proactive scheduler
+    tools/               # ST Card V2 parser (import_card.py)
 ```
+
+## Character setup
+
+Бот использует `CharacterConfig` dataclass для определения личности, внешности и стиля общения. По умолчанию — "Алиса", 24 года, дизайнер из Москвы.
+
+Можно изменить персонажа двумя способами:
+1. **Напрямую** — редактировать `DEFAULT_CHARACTER` в `src/bot/character.py`
+2. **Импорт ST Card** — скачать карту с [CharaVault](https://charavault.net/), [AI Character Cards](https://aicharactercards.com/) или [CharacterCard.com](https://charactercard.com/download) и импортировать:
+   ```bash
+   uv run python -m bot.tools.import_card path/to/card.png
+   ```
+
+Подробнее: **[docs/CHARACTER_SETUP.md](docs/CHARACTER_SETUP.md)** — маппинг полей, визуальная идентичность, спрайты.
 
 ## Notes
 
