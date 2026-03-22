@@ -77,6 +77,12 @@ async def build_app_context() -> AppContext:
     Returns:
         Populated AppContext with all services.
     """
+    from bot.config import settings
+
+    if not settings.llm_api_key:
+        logger.error("LLM_API_KEY is required — bot cannot respond without it")
+        raise SystemExit(1)
+
     # --- Required services ---
     from bot.llm.service import LLMService
 
@@ -90,10 +96,13 @@ async def build_app_context() -> AppContext:
 
     from bot.infra.langfuse_service import LangfuseService
 
-    try:
-        langfuse = LangfuseService()
-    except Exception as exc:
-        logger.warning("LangfuseService init failed, creating stub: {}", exc)
+    if settings.langfuse_enabled and settings.langfuse_public_key:
+        try:
+            langfuse = LangfuseService()
+        except Exception as exc:
+            logger.warning("LangfuseService init failed, creating stub: {}", exc)
+            langfuse = _StubLangfuse()
+    else:
         langfuse = _StubLangfuse()
 
     # --- Optional services ---
