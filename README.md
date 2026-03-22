@@ -41,7 +41,7 @@ All configuration via `.env` file (loaded by pydantic-settings).
 |---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | **Yes** | — | Bot crashes at startup without it |
 | `LLM_BASE_URL` | No | OpenAI | LLM provider endpoint |
-| `LLM_API_KEY` | No | — | API key for LLM provider |
+| `LLM_API_KEY` | **Yes** | — | API key for LLM provider (bot exits at startup without it) |
 | `LLM_MODEL` | No | `kimi-k2p5` | Model name |
 | `LLM_TEMPERATURE` | No | `0.7` | Generation temperature |
 | `LLM_MAX_TOKENS` | No | `1024` | Max completion tokens |
@@ -54,8 +54,19 @@ All configuration via `.env` file (loaded by pydantic-settings).
 | `LANGFUSE_PUBLIC_KEY` | No | — | Langfuse observability |
 | `LANGFUSE_SECRET_KEY` | No | — | Langfuse observability |
 | `LANGFUSE_BASE_URL` | No | `https://cloud.langfuse.com` | Langfuse host |
+| `LANGFUSE_ENABLED` | No | `true` | Set to `false` to disable Langfuse init |
 | `SUPABASE_URL` | No | — | Supabase project URL (for DB persistence) |
 | `SUPABASE_SERVICE_KEY` | No | — | Supabase service role key |
+
+## Deployment
+
+```bash
+# Docker (local or VPS)
+docker compose up -d --build                    # bot only
+docker compose --profile with-redis up -d       # bot + Redis
+```
+
+CI/CD: GitHub Actions CI (`.github/workflows/ci.yml`) runs lint + type-check + tests on push/PR to `main`. On CI success, `.github/workflows/deploy.yml` SSHs to VPS and redeploys via `docker compose`. Supabase migrations (`supabase_migrations/`) must be applied manually before deploy.
 
 ## Development
 

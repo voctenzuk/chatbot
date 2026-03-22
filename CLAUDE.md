@@ -36,7 +36,7 @@ CI gate (all must pass): `uvx ruff format --check .` → `uvx ruff check .` → 
 
 **Commands:** `/start` (onboarding: new user greeting + photo vs returning user welcome), `/upgrade` (Telegram Stars), `/stats` (daily usage dashboard).
 
-**Wiring:** Composition root in `src/bot/wiring.py`. `build_app_context()` → `AppContext` dataclass. `ChatPipeline` receives deps via constructor. Handlers get `pipeline` + `db_client` via `dp.workflow_data`.
+**Wiring:** Composition root in `src/bot/wiring.py`. `build_app_context()` → `AppContext` dataclass. `ChatPipeline` receives deps via constructor. Handlers get `pipeline` + `db_client` via `dp.workflow_data`. Startup validation: `LLM_API_KEY` missing → `SystemExit(1)`. Langfuse init skipped when `LANGFUSE_ENABLED=false` or no keys.
 
 **Graceful degradation:** mem0, Supabase, Redis are optional — bot falls back to in-memory operation. Photo generation is fail-closed (no DB = no photos).
 
@@ -81,6 +81,14 @@ Protocols: `LLMPort`, `MemoryPort`, `MessageDeliveryPort` — only where swappin
 Two tiers (Free/Plus), Pro seeded but YAGNI for MVP. Photo limits: Free=3/day, Plus=10/day.
 Cost tracking: `COST_PER_1M_INPUT=0.15`, `COST_PER_1M_OUTPUT=0.60` in `chat_pipeline.py`. Image cost via `ImageResult.cost_cents` (fallback `DEFAULT_IMAGE_COST_CENTS=4.0` in `image_service.py`).
 Photo rate limit: atomic `try_consume_photo` RPC (race-safe, plan-tier-aware).
+
+## Deployment
+
+**Docker:** `Dockerfile` (multi-stage, Python 3.13-slim, non-root user) + `docker-compose.yml` (bot service + optional Redis via `with-redis` profile). Bot reads `.env` via `env_file`.
+
+**CD:** `.github/workflows/deploy.yml` — triggers on CI workflow success on `main` (via `workflow_run`). SSHs to VPS, `git pull`, `docker compose up -d --build`. Supabase migrations must be applied manually before deploy.
+
+**Config template:** `.env.example` documents all required/optional vars. `cp .env.example .env` to get started.
 
 ## Branching
 
