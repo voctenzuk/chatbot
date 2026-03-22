@@ -4,7 +4,7 @@ import re
 
 import pytest
 
-from bot.character import DEFAULT_CHARACTER, CharacterConfig
+from bot.character import DEFAULT_CHARACTER, SPRITE_EMOTIONS, CharacterConfig
 
 
 class TestDefaultCharacter:
@@ -55,3 +55,62 @@ class TestDefaultCharacter:
         assert custom.voice_style == "Формальный стиль"
         assert custom.greeting == "Привет тестовый"
         assert custom.example_messages == ["Пример 1", "Пример 2"]
+
+    def test_default_character_reference_fields_present(self) -> None:
+        """DEFAULT_CHARACTER has reference_image_url and sprite_urls attributes."""
+        assert hasattr(DEFAULT_CHARACTER, "reference_image_url")
+        assert hasattr(DEFAULT_CHARACTER, "sprite_urls")
+
+
+class TestCharacterConfigNewFields:
+    """Tests for reference image and sprite fields added in Visual Identity."""
+
+    def test_accepts_reference_image_url(self) -> None:
+        config = CharacterConfig(
+            name="A",
+            personality="P",
+            appearance_en="E",
+            voice_style="V",
+            greeting="G",
+            example_messages=[],
+            reference_image_url="https://example.com/ref.png",
+        )
+        assert config.reference_image_url == "https://example.com/ref.png"
+
+    def test_accepts_sprite_urls(self) -> None:
+        sprites = {"smile": "https://storage.example.com/smile.png"}
+        config = CharacterConfig(
+            name="A",
+            personality="P",
+            appearance_en="E",
+            voice_style="V",
+            greeting="G",
+            example_messages=[],
+            sprite_urls=sprites,
+        )
+        assert config.sprite_urls == sprites
+
+    def test_new_fields_default_to_none(self) -> None:
+        config = CharacterConfig(
+            name="A",
+            personality="P",
+            appearance_en="E",
+            voice_style="V",
+            greeting="G",
+            example_messages=[],
+        )
+        assert config.reference_image_url is None
+        assert config.sprite_urls is None
+
+
+class TestSpriteEmotions:
+    """Tests for SPRITE_EMOTIONS constant."""
+
+    def test_is_tuple_of_strings(self) -> None:
+        assert isinstance(SPRITE_EMOTIONS, tuple)
+        assert len(SPRITE_EMOTIONS) == 5
+        for emotion in SPRITE_EMOTIONS:
+            assert isinstance(emotion, str)
+
+    def test_contains_expected_emotions(self) -> None:
+        assert set(SPRITE_EMOTIONS) == {"smile", "sad", "laugh", "thinking", "wink"}

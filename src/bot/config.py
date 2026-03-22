@@ -22,7 +22,7 @@ class Settings(BaseSettings):
 
     image_base_url: str | None = None
     image_api_key: str | None = None
-    image_model: str = "gpt-image-1"
+    image_model: str = "bytedance/seedream-4.5"
 
     # Langfuse observability
     langfuse_public_key: str | None = None
