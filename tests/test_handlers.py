@@ -109,9 +109,7 @@ def mock_pipeline() -> MagicMock:
     pipeline.db_client = None
 
     # Mock handle_message for chat handler
-    pipeline.handle_message = AsyncMock(
-        return_value=ChatResult(response_text="test reply", image_bytes=None)
-    )
+    pipeline.handle_message = AsyncMock(return_value=ChatResult(response_text="test reply"))
 
     return pipeline
 

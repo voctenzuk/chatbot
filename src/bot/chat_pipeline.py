@@ -5,7 +5,7 @@ with zero aiogram dependencies. Receives all services via constructor.
 """
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -19,14 +19,13 @@ from bot.conversation.context_builder import (
 from bot.conversation.episode_manager import EpisodeManager, EpisodeMessage
 from bot.conversation.system_prompt import get_system_prompt
 from bot.llm.service import LLMResponse, LLMService, ToolCall
-from bot.media.image_service import SEND_PHOTO_TOOL
+from bot.media.image_service import SEND_PHOTO_TOOL, SEND_SPRITE_TOOL, ImageResult
 
 LLM_FALLBACK = "Прости, у меня сейчас не получается ответить. Попробуй ещё раз чуть позже."
 
 # LLM cost per 1M tokens in cents (kimi-k2p5 pricing)
 COST_PER_1M_INPUT = 0.15
 COST_PER_1M_OUTPUT = 0.60
-IMAGE_COST_CENTS = 5.0
 
 _ROLE_MAP = {
     "user": MessageRole.USER,
@@ -40,7 +39,7 @@ class ChatResult:
     """Result of processing a chat message. Framework-agnostic."""
 
     response_text: str
-    image_bytes: bytes | None = None
+    image_bytes: list[bytes] = field(default_factory=list)
     llm_response: LLMResponse | None = None
     was_rate_limited: bool = False
 
@@ -139,7 +138,7 @@ class ChatPipeline:
                 logger.warning("Rate limit check failed for user {}, allowing: {}", user_id, exc)
 
         # 3. Generate LLM response
-        generated_images: dict[str, bytes] = {}
+        generated_images: dict[str, Any] = {}
         try:
             llm_response = await self._generate_llm_response(
                 user_id=user_id,
@@ -153,13 +152,19 @@ class ChatPipeline:
             response = LLM_FALLBACK
             llm_response = None
 
-        # 4. Retrieve cached image from tool loop (already generated in _execute_tool_for_loop)
-        image_bytes: bytes | None = None
+        # 4. Retrieve all cached images from tool loop
+        all_images: list[bytes] = []
+        image_cost_cents: float = 0.0
         if llm_response is not None and llm_response.tool_calls:
             for tool_call in llm_response.tool_calls:
-                if tool_call.name == "send_photo" and tool_call.id in generated_images:
-                    image_bytes = generated_images.pop(tool_call.id)
-                    break
+                if tool_call.id in generated_images:
+                    cached = generated_images.pop(tool_call.id)
+                    if isinstance(cached, ImageResult):
+                        all_images.append(cached.image_bytes)
+                        image_cost_cents += cached.cost_cents
+                    else:
+                        # Raw bytes (e.g. sprites)
+                        all_images.append(cached)
 
         # 5. Persist assistant response + track usage
         if llm_response is not None:
@@ -182,8 +187,7 @@ class ChatPipeline:
                     llm_response.tokens_in * COST_PER_1M_INPUT
                     + llm_response.tokens_out * COST_PER_1M_OUTPUT
                 ) / 1_000_000
-                if image_bytes is not None:
-                    cost_cents += IMAGE_COST_CENTS
+                cost_cents += image_cost_cents
                 await self.db_client.increment_usage(
                     user_id,
                     msg_count=1,
@@ -204,7 +208,7 @@ class ChatPipeline:
 
         return ChatResult(
             response_text=response,
-            image_bytes=image_bytes,
+            image_bytes=all_images,
             llm_response=llm_response,
         )
 
@@ -217,7 +221,7 @@ class ChatPipeline:
         user_id: int,
         content: str,
         user_name: str | None,
-        generated_images: dict[str, bytes] | None = None,
+        generated_images: dict[str, Any] | None = None,
     ) -> LLMResponse:
         """Build context and call LLM to produce a reply."""
         if generated_images is None:
@@ -255,10 +259,10 @@ class ChatPipeline:
                 system_prompt=system_prompt,
             )
 
-            # First LLM call (with image tool if available)
+            # First LLM call (with image tools if available)
             tools = None
             if self._image_service is not None:
-                tools = [SEND_PHOTO_TOOL]
+                tools = [SEND_PHOTO_TOOL, SEND_SPRITE_TOOL]
 
             llm_response = await self._llm.generate(llm_messages, tools=tools)
 
@@ -303,12 +307,13 @@ class ChatPipeline:
         self,
         tool_call: ToolCall,
         user_id: int,
-        generated_images: dict[str, bytes],
+        generated_images: dict[str, Any],
     ) -> str:
         """Execute a tool call and return a result string for the LLM.
 
         Generated images are cached in generated_images so handle_message
         can deliver them without re-generating (avoids double API cost).
+        Values are ImageResult (for photos) or raw bytes (for sprites).
         """
         if tool_call.name == "send_photo":
             try:
@@ -326,13 +331,27 @@ class ChatPipeline:
                     return "Image service unavailable"
 
                 prompt = tool_call.args.get("prompt", "")
-                image_bytes = await self._image_service.generate(prompt, user_id)
-                if image_bytes is not None:
-                    generated_images[tool_call.id] = image_bytes
+                image_result = await self._image_service.generate(prompt, user_id)
+                if image_result is not None:
+                    generated_images[tool_call.id] = image_result
                     return f"Photo generated successfully for prompt: {prompt[:50]}"
                 return "Image generation failed"
             except Exception as e:
                 return f"Image generation failed: {e}"
+
+        if tool_call.name == "send_sprite":
+            try:
+                if self._image_service is None:
+                    return "Sprite service unavailable"
+                emotion = tool_call.args.get("emotion", "smile")
+                sprite_bytes = await self._image_service.get_sprite(emotion)
+                if sprite_bytes is not None:
+                    generated_images[tool_call.id] = sprite_bytes  # raw bytes, no cost
+                    return f"Sent emotion sprite: {emotion}"
+                return "Sprite unavailable"
+            except Exception as e:
+                return f"Sprite failed: {e}"
+
         return f"Unknown tool: {tool_call.name}"
 
     async def _write_memory_background(self, memory_content: str, user_id: int) -> None:

@@ -9,7 +9,6 @@ import pytest
 from bot.chat_pipeline import (
     COST_PER_1M_INPUT,
     COST_PER_1M_OUTPUT,
-    IMAGE_COST_CENTS,
     LLM_FALLBACK,
     ChatPipeline,
     ChatResult,
@@ -95,7 +94,7 @@ class TestChatPipeline:
         assert result.response_text == "Привет, как дела?"
         assert result.llm_response is not None
         assert result.was_rate_limited is False
-        assert result.image_bytes is None
+        assert result.image_bytes == []
 
     @pytest.mark.asyncio
     async def test_handle_message_llm_failure_returns_fallback(self) -> None:
@@ -135,6 +134,8 @@ class TestChatPipeline:
     @pytest.mark.asyncio
     async def test_handle_message_tool_call_produces_image_bytes(self) -> None:
         """Tool call with send_photo -> image_bytes in ChatResult."""
+        from bot.media.image_service import ImageResult
+
         tool_calls = [ToolCall(name="send_photo", args={"prompt": "cat"}, id="tc-1")]
         first_resp = _make_llm_response("", tool_calls=tool_calls)
         final_resp = _make_llm_response("Вот твоя картинка!")
@@ -142,7 +143,9 @@ class TestChatPipeline:
         llm_svc = AsyncMock()
         llm_svc.generate = AsyncMock(side_effect=[first_resp, final_resp])
 
-        fake_image = b"\x89PNG_fake_image_data"
+        fake_image = ImageResult(
+            image_bytes=b"\x89PNG_fake_image_data", cost_cents=4.0, provider="t"
+        )
         mock_img = AsyncMock()
         mock_img.generate = AsyncMock(return_value=fake_image)
 
@@ -168,7 +171,7 @@ class TestChatPipeline:
                 if original is not None:
                     _img_mod.SEND_PHOTO_TOOL = original
 
-        assert result.image_bytes == fake_image
+        assert b"\x89PNG_fake_image_data" in result.image_bytes
         assert result.response_text == "Вот твоя картинка!"
 
     @pytest.mark.asyncio
@@ -236,7 +239,9 @@ class TestCostTrackingAndPhotoRateLimit:
 
     @pytest.mark.asyncio
     async def test_cost_cents_includes_image_cost_when_image_generated(self) -> None:
-        """cost_cents adds IMAGE_COST_CENTS when an image is generated."""
+        """cost_cents uses ImageResult.cost_cents when an image is generated."""
+        from bot.media.image_service import ImageResult
+
         tool_calls = [ToolCall(name="send_photo", args={"prompt": "cat"}, id="tc-1")]
         first_resp = _make_llm_response("", tool_calls=tool_calls)
         final_resp = _make_llm_response("Вот картинка!")
@@ -244,9 +249,9 @@ class TestCostTrackingAndPhotoRateLimit:
         llm_svc = AsyncMock()
         llm_svc.generate = AsyncMock(side_effect=[first_resp, final_resp])
 
-        fake_image = b"\x89PNG_fake"
+        fake_result = ImageResult(image_bytes=b"\x89PNG_fake", cost_cents=4.0, provider="test")
         mock_img = AsyncMock()
-        mock_img.generate = AsyncMock(return_value=fake_image)
+        mock_img.generate = AsyncMock(return_value=fake_result)
 
         mock_db = AsyncMock()
         mock_db.check_rate_limit = AsyncMock(return_value=True)
@@ -256,14 +261,14 @@ class TestCostTrackingAndPhotoRateLimit:
         pipeline = _make_pipeline(llm=llm_svc, image_service=mock_img, db_client=mock_db)
         result = await pipeline.handle_message(user_id=1, content="нарисуй кота")
 
-        assert result.image_bytes is not None
+        assert len(result.image_bytes) > 0
         mock_db.increment_usage.assert_called_once()
         call_kwargs = mock_db.increment_usage.call_args
         cost_cents = call_kwargs.kwargs.get("cost_cents") or call_kwargs[1].get("cost_cents")
         if cost_cents is None:
             cost_cents = call_kwargs[0][4] if len(call_kwargs[0]) > 4 else None
         assert cost_cents is not None
-        assert cost_cents >= IMAGE_COST_CENTS
+        assert cost_cents >= 4.0
 
     @pytest.mark.asyncio
     async def test_photo_rate_limit_returns_limit_message(self) -> None:
@@ -289,7 +294,7 @@ class TestCostTrackingAndPhotoRateLimit:
         # Image should NOT have been generated
         mock_img.generate.assert_not_called()
         # No image bytes delivered
-        assert result.image_bytes is None
+        assert result.image_bytes == []
 
     @pytest.mark.asyncio
     async def test_photo_no_db_returns_unavailable(self) -> None:
@@ -309,11 +314,13 @@ class TestCostTrackingAndPhotoRateLimit:
         result = await pipeline.handle_message(user_id=1, content="фото")
 
         mock_img.generate.assert_not_called()
-        assert result.image_bytes is None
+        assert result.image_bytes == []
 
     @pytest.mark.asyncio
     async def test_photo_rate_limit_true_generates_normally(self) -> None:
         """try_consume_photo returns True -> photo generated and returned normally."""
+        from bot.media.image_service import ImageResult
+
         tool_calls = [ToolCall(name="send_photo", args={"prompt": "selfie"}, id="tc-1")]
         first_resp = _make_llm_response("", tool_calls=tool_calls)
         final_resp = _make_llm_response("Вот!")
@@ -321,9 +328,9 @@ class TestCostTrackingAndPhotoRateLimit:
         llm_svc = AsyncMock()
         llm_svc.generate = AsyncMock(side_effect=[first_resp, final_resp])
 
-        fake_image = b"\x89PNG_data"
+        fake_result = ImageResult(image_bytes=b"\x89PNG_data", cost_cents=4.0, provider="test")
         mock_img = AsyncMock()
-        mock_img.generate = AsyncMock(return_value=fake_image)
+        mock_img.generate = AsyncMock(return_value=fake_result)
 
         mock_db = AsyncMock()
         mock_db.check_rate_limit = AsyncMock(return_value=True)
@@ -334,7 +341,134 @@ class TestCostTrackingAndPhotoRateLimit:
         result = await pipeline.handle_message(user_id=1, content="селфи")
 
         mock_img.generate.assert_called_once()
-        assert result.image_bytes == fake_image
+        assert b"\x89PNG_data" in result.image_bytes
+
+
+class TestSpriteToolPipeline:
+    """Tests for send_sprite tool handling in ChatPipeline."""
+
+    @pytest.mark.asyncio
+    async def test_send_sprite_returns_image(self) -> None:
+        """send_sprite tool call produces sprite bytes in result."""
+        tool_calls = [ToolCall(name="send_sprite", args={"emotion": "smile"}, id="tc-1")]
+        first_resp = _make_llm_response("", tool_calls=tool_calls)
+        final_resp = _make_llm_response("Улыбаюсь!")
+
+        llm_svc = AsyncMock()
+        llm_svc.generate = AsyncMock(side_effect=[first_resp, final_resp])
+
+        mock_img = AsyncMock()
+        mock_img.get_sprite = AsyncMock(return_value=b"smile-png")
+
+        mock_db = AsyncMock()
+        mock_db.check_rate_limit = AsyncMock(return_value=True)
+        mock_db.increment_usage = AsyncMock()
+
+        pipeline = _make_pipeline(llm=llm_svc, image_service=mock_img, db_client=mock_db)
+        result = await pipeline.handle_message(user_id=1, content="улыбнись")
+
+        mock_img.get_sprite.assert_called_once_with("smile")
+        assert b"smile-png" in result.image_bytes
+
+    @pytest.mark.asyncio
+    async def test_send_sprite_not_rate_limited(self) -> None:
+        """send_sprite does NOT call try_consume_photo."""
+        tool_calls = [ToolCall(name="send_sprite", args={"emotion": "sad"}, id="tc-1")]
+        first_resp = _make_llm_response("", tool_calls=tool_calls)
+        final_resp = _make_llm_response("Грустно...")
+
+        llm_svc = AsyncMock()
+        llm_svc.generate = AsyncMock(side_effect=[first_resp, final_resp])
+
+        mock_img = AsyncMock()
+        mock_img.get_sprite = AsyncMock(return_value=b"sad-png")
+
+        mock_db = AsyncMock()
+        mock_db.check_rate_limit = AsyncMock(return_value=True)
+        mock_db.try_consume_photo = AsyncMock(return_value=True)
+        mock_db.increment_usage = AsyncMock()
+
+        pipeline = _make_pipeline(llm=llm_svc, image_service=mock_img, db_client=mock_db)
+        await pipeline.handle_message(user_id=1, content="грустно")
+
+        mock_db.try_consume_photo.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_send_sprite_cost_is_zero(self) -> None:
+        """Sprite images have zero cost in usage tracking."""
+        tool_calls = [ToolCall(name="send_sprite", args={"emotion": "wink"}, id="tc-1")]
+        first_resp = _make_llm_response("", tool_calls=tool_calls)
+        final_resp = _make_llm_response("😉")
+
+        llm_svc = AsyncMock()
+        llm_svc.generate = AsyncMock(side_effect=[first_resp, final_resp])
+
+        mock_img = AsyncMock()
+        mock_img.get_sprite = AsyncMock(return_value=b"wink-png")
+
+        mock_db = AsyncMock()
+        mock_db.check_rate_limit = AsyncMock(return_value=True)
+        mock_db.increment_usage = AsyncMock()
+
+        pipeline = _make_pipeline(llm=llm_svc, image_service=mock_img, db_client=mock_db)
+        await pipeline.handle_message(user_id=1, content="подмигни")
+
+        mock_db.increment_usage.assert_called_once()
+        call_kwargs = mock_db.increment_usage.call_args
+        cost_cents = call_kwargs.kwargs.get("cost_cents") or call_kwargs[1].get("cost_cents")
+        if cost_cents is None:
+            cost_cents = call_kwargs[0][4] if len(call_kwargs[0]) > 4 else None
+        # Cost should be token cost only, no image cost
+        assert cost_cents is not None
+        assert cost_cents < 1.0  # Only token cost, no image cost added
+
+    @pytest.mark.asyncio
+    async def test_send_sprite_unavailable(self) -> None:
+        """When sprite is unavailable, no image in result."""
+        tool_calls = [ToolCall(name="send_sprite", args={"emotion": "angry"}, id="tc-1")]
+        first_resp = _make_llm_response("", tool_calls=tool_calls)
+        final_resp = _make_llm_response("Не получилось.")
+
+        llm_svc = AsyncMock()
+        llm_svc.generate = AsyncMock(side_effect=[first_resp, final_resp])
+
+        mock_img = AsyncMock()
+        mock_img.get_sprite = AsyncMock(return_value=None)
+
+        mock_db = AsyncMock()
+        mock_db.check_rate_limit = AsyncMock(return_value=True)
+        mock_db.increment_usage = AsyncMock()
+
+        pipeline = _make_pipeline(llm=llm_svc, image_service=mock_img, db_client=mock_db)
+        result = await pipeline.handle_message(user_id=1, content="злись")
+
+        assert result.image_bytes == []
+
+    @pytest.mark.asyncio
+    async def test_tools_list_includes_both_tools(self) -> None:
+        """When image service available, both send_photo and send_sprite are passed to LLM."""
+        llm_svc = AsyncMock()
+        llm_resp = _make_llm_response("Привет!")
+        llm_svc.generate = AsyncMock(return_value=llm_resp)
+
+        mock_img = AsyncMock()
+
+        mock_db = AsyncMock()
+        mock_db.check_rate_limit = AsyncMock(return_value=True)
+        mock_db.increment_usage = AsyncMock()
+
+        pipeline = _make_pipeline(llm=llm_svc, image_service=mock_img, db_client=mock_db)
+        await pipeline.handle_message(user_id=1, content="привет")
+
+        # Check tools passed to LLM
+        call_kwargs = llm_svc.generate.call_args
+        tools = call_kwargs.kwargs.get("tools") or (
+            call_kwargs[1].get("tools") if len(call_kwargs) > 1 else None
+        )
+        assert tools is not None
+        tool_names = [t["name"] for t in tools]
+        assert "send_photo" in tool_names
+        assert "send_sprite" in tool_names
 
 
 class TestFireAndForget:

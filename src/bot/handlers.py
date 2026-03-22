@@ -46,10 +46,10 @@ async def start(message: Message, pipeline: ChatPipeline) -> None:
             img_service = pipeline.image_service
             if img_service is not None:
                 try:
-                    photo = await img_service.generate("casual selfie, smiling warmly", user_id)
-                    if photo:
+                    result = await img_service.generate("casual selfie, smiling warmly", user_id)
+                    if result:
                         await message.answer_photo(
-                            photo=BufferedInputFile(photo, filename="hello.png"),
+                            photo=BufferedInputFile(result.image_bytes, filename="hello.png"),
                         )
                 except Exception as e:
                     logger.warning("Onboarding photo failed for user {}: {}", user_id, e)
@@ -181,12 +181,13 @@ async def chat(message: Message, pipeline: ChatPipeline) -> None:
         )
 
         # Deliver response via Telegram
-        if result.image_bytes is not None:
+        if result.image_bytes:
             if result.response_text and result.response_text.strip():
                 await message.answer(result.response_text)
-            await message.answer_photo(
-                photo=BufferedInputFile(result.image_bytes, filename="photo.png"),
-            )
+            for img in result.image_bytes:
+                await message.answer_photo(
+                    photo=BufferedInputFile(img, filename="photo.png"),
+                )
         elif result.response_text and result.response_text.strip():
             await message.answer(result.response_text)
 

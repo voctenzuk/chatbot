@@ -122,7 +122,10 @@ async def build_app_context() -> AppContext:
         from bot.media.image_service import ImageService
 
         image_service = ImageService(character=DEFAULT_CHARACTER)
-        logger.info("ImageService created")
+        logger.info(
+            "ImageService created (reference_image={})",
+            bool(DEFAULT_CHARACTER.reference_image_url),
+        )
     except Exception as exc:
         logger.info("ImageService unavailable ({}), running without image generation", exc)
 
