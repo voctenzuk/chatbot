@@ -17,6 +17,20 @@
 **Effort:** S (ручной анализ + OpenRouter dashboard)
 **Depends on:** Reference Images feature + 1 неделя данных
 
+### Subscription Expiry Cron Job
+**What:** Background job для пометки истёкших подписок `status='expired'` и отправки renewal reminders.
+**Why:** Сейчас RPCs проверяют `current_period_end >= NOW()` корректно, но `status` остаётся `'active'` навсегда. Для чистоты данных и renewal UX нужен cron.
+**Context:** `check_rate_limit` и `try_consume_photo` уже правильно фильтруют по периоду. `status='active'` с истёкшим периодом = функционально Free. Но без явного expiry: нет renewal reminders, грязные данные в analytics.
+**Effort:** S (CC ~15 min)
+**Depends on:** Launch readiness (завершён)
+
+### Payment Reconciliation Hardening
+**What:** Retry queue для failed `record_payment`, верификация против Telegram API, алерты на пропущенные записи.
+**Why:** `record_payment` — best-effort (warning-only при ошибке). Для 10 друзей OK, при масштабировании нужна гарантия записи для аудита/рефандов.
+**Context:** Текущий flow: `record_payment` → `activate_subscription`. Если `record_payment` RPC fails, payment record теряется но подписка не активируется (duplicate check returns False). Нужно: retry queue, reconciliation cron сверяющий Telegram Stars API с БД.
+**Effort:** M (CC ~30 min)
+**Depends on:** Launch readiness (завершён) + реальные платежи для тестирования
+
 ### Relationship Levels (Gamification)
 **What:** Использовать `relationship_depth` (0-10) из `memory_models.py`. По мере общения уровень растёт → бот становится теплее, отправляет больше фото, пишет чаще первым.
 **Why:** Retention mechanism — пользователь не хочет терять прогресс. Создаёт ощущение развивающихся отношений.
