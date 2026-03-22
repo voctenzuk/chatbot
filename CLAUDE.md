@@ -21,7 +21,7 @@ CI gate (all must pass): `uvx ruff format --check .` → `uvx ruff check .` → 
 
 **Configuration:** `src/bot/config.py` — `Settings(BaseSettings)`, reads `.env`. Import as `from bot.config import settings`.
 
-**Character:** `src/bot/character.py` — `CharacterConfig` frozen dataclass + `DEFAULT_CHARACTER`. Personality (Russian), appearance (English for image models), voice style, greeting, few-shot examples. Loaded in `wiring.py`, passed to `ChatPipeline` + `ImageService`.
+**Character:** `src/bot/character.py` — `CharacterConfig` frozen dataclass + `DEFAULT_CHARACTER`. Personality (Russian), appearance (English for image models), voice style, greeting, few-shot examples, `SPRITE_EMOTIONS` tuple. Loaded in `wiring.py`, passed to `ChatPipeline` + `ImageService`.
 
 **Request flow** (per message in `handlers.py`):
 1. `EpisodeManager.process_user_message()` — persist + auto-switch episodes (8h gap or topic shift)
@@ -30,7 +30,7 @@ CI gate (all must pass): `uvx ruff format --check .` → `uvx ruff check .` → 
 4. `get_system_prompt(character=...)` — build prompt from `CharacterConfig` (personality + voice + examples)
 5. `ContextBuilder.assemble_for_llm()` — merge history + semantic memories + system prompt
 6. `LLMService.generate()` — LLM call via LangChain, returns `LLMResponse`
-7. Tool calls: `send_photo` → `try_consume_photo()` (atomic DB check) → `ImageService.generate()` (prepends `appearance_en`)
+7. Tool calls: `send_photo` → `try_consume_photo()` (atomic DB check) → `ImageService.generate()` via OpenRouter `chat.completions.create(modalities=["image"])`; `send_sprite` → `ImageService.get_sprite()` (cached emotion sprites from Supabase Storage)
 8. `increment_usage(cost_cents=...)` — track tokens + cost per message/photo
 9. Response persisted to episode, sent to user
 
@@ -79,7 +79,7 @@ Protocols: `LLMPort`, `MemoryPort`, `MessageDeliveryPort` — only where swappin
 ## Monetization
 
 Two tiers (Free/Plus), Pro seeded but YAGNI for MVP. Photo limits: Free=3/day, Plus=10/day.
-Cost tracking: `COST_PER_1M_INPUT=0.15`, `COST_PER_1M_OUTPUT=0.60`, `IMAGE_COST_CENTS=5.0` in `chat_pipeline.py`.
+Cost tracking: `COST_PER_1M_INPUT=0.15`, `COST_PER_1M_OUTPUT=0.60` in `chat_pipeline.py`. Image cost via `ImageResult.cost_cents` (fallback `DEFAULT_IMAGE_COST_CENTS=4.0` in `image_service.py`).
 Photo rate limit: atomic `try_consume_photo` RPC (race-safe, plan-tier-aware).
 
 ## Branching

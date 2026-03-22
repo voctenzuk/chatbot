@@ -10,7 +10,8 @@ Russian-language AI companion chatbot built with **aiogram 3** (async, long-poll
 - **Long-term memory** — mem0 with automatic fact extraction, dedup, and conflict resolution
 - **Automatic episode management** — new episodes on 8h time gap or topic shift (cosine similarity < 0.7)
 - **Episode summarization** — running/chunk/final summaries for context compression
-- **Image generation** — LLM decides when to send photos via tool calling (OpenAI Images API)
+- **Image generation** — LLM decides when to send photos via tool calling (OpenRouter, `chat.completions.create` with image modality)
+- **Sprite system** — pre-generated emotion sprites with Supabase Storage caching
 - **Proactive messaging** — bot initiates conversations based on context and schedule
 - **Monetization** — Telegram Stars payments, tiered subscriptions (Free/Plus), per-message cost tracking
 - **Photo paywall** — daily photo limits per tier with atomic DB-based rate limiting
@@ -49,7 +50,7 @@ All configuration via `.env` file (loaded by pydantic-settings).
 | `REDIS_URL` | No | — | Redis for rate-limiting; falls back gracefully |
 | `IMAGE_BASE_URL` | No | OpenAI | Image generation API endpoint |
 | `IMAGE_API_KEY` | No | — | Image generation API key |
-| `IMAGE_MODEL` | No | `gpt-image-1` | Image model name |
+| `IMAGE_MODEL` | No | `bytedance/seedream-4.5` | Image model name (OpenRouter) |
 | `LANGFUSE_PUBLIC_KEY` | No | — | Langfuse observability |
 | `LANGFUSE_SECRET_KEY` | No | — | Langfuse observability |
 | `LANGFUSE_BASE_URL` | No | `https://cloud.langfuse.com` | Langfuse host |
