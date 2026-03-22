@@ -81,7 +81,7 @@ async def upgrade(message: Message) -> None:
         title="Plus подписка",
         description="100 сообщений в день + фото. 30 дней.",
         payload="plan:plus",
-        provider_token="",
+        provider_token="",  # Empty for Telegram Stars (XTR) — no third-party provider needed
         currency="XTR",
         prices=[LabeledPrice(label="Plus (30 дней)", amount=385)],
     )
@@ -114,14 +114,8 @@ async def successful_payment(message: Message, db_client: Any | None = None) -> 
         plan_slug = payload.replace("plan:", "") if payload.startswith("plan:") else None
 
         if plan_slug and db_client is not None:
-            try:
-                await db_client.activate_subscription(user_id, plan_slug)
-                await message.answer("Подписка активирована! Спасибо 💕")
-            except Exception as e:
-                logger.error("Failed to activate subscription for user {}: {}", user_id, e)
-                await message.answer(
-                    "Оплата получена, но произошла ошибка. Напиши /start и попробуй снова."
-                )
+            await _process_payment(user_id, payment, db_client, plan_slug)
+            await message.answer("Подписка активирована! Спасибо 💕")
         elif plan_slug and db_client is None:
             logger.error("Payment received but DB unavailable for user {}", user_id)
             await message.answer(
@@ -134,6 +128,33 @@ async def successful_payment(message: Message, db_client: Any | None = None) -> 
         await message.answer(
             "Прости, при обработке платежа что-то пошло не так. Напиши /start и попробуй снова."
         )
+
+
+async def _process_payment(user_id: int, payment: Any, db_client: Any, plan_slug: str) -> None:
+    """Process payment: record first, then activate. Idempotent — skips if duplicate."""
+    charge_id = payment.telegram_payment_charge_id
+
+    # Record payment BEFORE activation — ensures payment record exists for reconciliation.
+    # Returns False if duplicate (ON CONFLICT DO NOTHING) or error.
+    is_new = await db_client.record_payment(
+        telegram_user_id=user_id,
+        amount_cents=payment.total_amount,
+        provider_payment_id=charge_id,
+    )
+
+    if not is_new:
+        logger.warning("Duplicate payment skipped: user={} charge_id={}", user_id, charge_id)
+        return
+
+    await db_client.activate_subscription(user_id, plan_slug)
+
+    logger.info(
+        "Payment succeeded: user={} plan={} amount={} charge_id={}",
+        user_id,
+        plan_slug,
+        payment.total_amount,
+        charge_id,
+    )
 
 
 @router.message(Command("stats"))

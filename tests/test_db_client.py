@@ -408,3 +408,47 @@ async def test_get_user_usage_today_returns_user_usage():
     assert usage.plan_slug == "plus"
     assert usage.total_cost == 2.5
     assert usage.days_together == 14
+
+
+@pytest.mark.asyncio
+async def test_record_payment_calls_rpc_with_correct_params():
+    """record_payment calls RPC with correct function name and param dict."""
+    mock_client = MagicMock()
+    rpc_result = MagicMock()
+    rpc_result.execute = MagicMock(return_value=MagicMock(data=None))
+    mock_client.rpc = MagicMock(return_value=rpc_result)
+
+    db = DatabaseClient(client=mock_client)
+    await db.record_payment(
+        telegram_user_id=42,
+        amount_cents=385,
+        provider_payment_id="charge_abc",
+    )
+
+    mock_client.rpc.assert_called_once_with(
+        "record_payment",
+        {
+            "p_user_id": 42,
+            "p_amount_cents": 385,
+            "p_provider_payment_id": "charge_abc",
+            "p_status": "succeeded",
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_record_payment_error_is_swallowed():
+    """record_payment swallows RPC errors and logs a warning."""
+    mock_client = MagicMock()
+    rpc_result = MagicMock()
+    rpc_result.execute = MagicMock(side_effect=RuntimeError("db write failed"))
+    mock_client.rpc = MagicMock(return_value=rpc_result)
+
+    db = DatabaseClient(client=mock_client)
+
+    # Should NOT raise
+    await db.record_payment(
+        telegram_user_id=42,
+        amount_cents=385,
+        provider_payment_id="charge_fail",
+    )

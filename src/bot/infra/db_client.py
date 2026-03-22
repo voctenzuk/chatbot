@@ -1002,6 +1002,32 @@ class DatabaseClient:
             logger.error("Failed to get artifact surrogates for context: {}", e)
             return []
 
+    async def record_payment(
+        self,
+        telegram_user_id: int,
+        amount_cents: int,
+        provider_payment_id: str,
+        status: str = "succeeded",
+    ) -> bool:
+        """Record a payment via Supabase RPC. Idempotent (ON CONFLICT DO NOTHING).
+
+        Returns True if a new payment was recorded, False if duplicate or error.
+        """
+        try:
+            result = self._client.rpc(
+                "record_payment",
+                {
+                    "p_user_id": telegram_user_id,
+                    "p_amount_cents": amount_cents,
+                    "p_provider_payment_id": provider_payment_id,
+                    "p_status": status,
+                },
+            ).execute()
+            return bool(result.data)
+        except Exception as exc:
+            logger.warning("Failed to record payment for user {}: {}", telegram_user_id, exc)
+            return False
+
     async def activate_subscription(
         self,
         telegram_user_id: int,

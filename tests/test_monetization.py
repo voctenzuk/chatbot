@@ -250,6 +250,75 @@ class TestDbClientProvisioning:
 
 
 # ---------------------------------------------------------------------------
+# TestDbClientRecordPayment
+# ---------------------------------------------------------------------------
+
+
+class TestDbClientRecordPayment:
+    """Tests for db_client.record_payment method."""
+
+    @pytest.mark.asyncio
+    async def test_record_payment_happy_path(self) -> None:
+        """RPC called with correct params for record_payment."""
+        mock_client = _make_mock_rpc()
+        db = DatabaseClient(client=mock_client)
+
+        await db.record_payment(
+            telegram_user_id=123,
+            amount_cents=385,
+            provider_payment_id="charge_123",
+        )
+
+        mock_client.rpc.assert_called_once_with(
+            "record_payment",
+            {
+                "p_user_id": 123,
+                "p_amount_cents": 385,
+                "p_provider_payment_id": "charge_123",
+                "p_status": "succeeded",
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_record_payment_duplicate_idempotent(self) -> None:
+        """Calling record_payment twice with same provider_payment_id does not raise.
+
+        ON CONFLICT DO NOTHING is server-side; from the client both calls succeed.
+        """
+        mock_client = _make_mock_rpc()
+        db = DatabaseClient(client=mock_client)
+
+        await db.record_payment(
+            telegram_user_id=123,
+            amount_cents=385,
+            provider_payment_id="charge_dup",
+        )
+        await db.record_payment(
+            telegram_user_id=123,
+            amount_cents=385,
+            provider_payment_id="charge_dup",
+        )
+
+        assert mock_client.rpc.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_record_payment_error_swallowed(self) -> None:
+        """RPC raises -> warning logged, no exception raised."""
+        mock_client = MagicMock()
+        mock_execute = MagicMock()
+        mock_execute.execute = MagicMock(side_effect=RuntimeError("db write failed"))
+        mock_client.rpc = MagicMock(return_value=mock_execute)
+        db = DatabaseClient(client=mock_client)
+
+        # Should NOT raise
+        await db.record_payment(
+            telegram_user_id=123,
+            amount_cents=385,
+            provider_payment_id="charge_err",
+        )
+
+
+# ---------------------------------------------------------------------------
 # TestHandlerMonetization — fixtures
 # ---------------------------------------------------------------------------
 
@@ -483,3 +552,61 @@ class TestHandlerMonetization:
         call_args = mock_db_client.activate_subscription.call_args
         assert call_args[0][0] == 42  # telegram_user_id
         assert "plus" in call_args[0][1]  # plan_slug contains "plus"
+
+    @pytest.mark.asyncio
+    async def test_successful_payment_calls_record_before_activate(
+        self, mock_db_client: AsyncMock
+    ) -> None:
+        """record_payment is called BEFORE activate_subscription."""
+        from bot.handlers import successful_payment
+
+        call_order: list[str] = []
+
+        async def _record(**kw: object) -> bool:
+            call_order.append("record_payment")
+            return True  # new payment (not duplicate)
+
+        mock_db_client.record_payment = AsyncMock(side_effect=_record)
+        mock_db_client.activate_subscription = AsyncMock(
+            side_effect=lambda *a, **kw: call_order.append("activate_subscription")
+        )
+
+        mock_payment = MagicMock()
+        mock_payment.invoice_payload = "plan:plus"
+        mock_payment.currency = "XTR"
+        mock_payment.total_amount = 385
+        mock_payment.telegram_payment_charge_id = "charge_789"
+
+        msg = MockMessage(text=None, user_id=42)
+        msg.successful_payment = mock_payment
+        await successful_payment(msg, db_client=mock_db_client)  # type: ignore[arg-type]
+
+        assert call_order == ["record_payment", "activate_subscription"]
+
+    @pytest.mark.asyncio
+    async def test_successful_payment_duplicate_skips_activation(
+        self, mock_db_client: AsyncMock
+    ) -> None:
+        """When record_payment returns False (duplicate), activation is skipped."""
+        from bot.handlers import successful_payment
+
+        mock_db_client.record_payment = AsyncMock(return_value=False)
+        mock_db_client.activate_subscription = AsyncMock()
+
+        mock_payment = MagicMock()
+        mock_payment.invoice_payload = "plan:plus"
+        mock_payment.currency = "XTR"
+        mock_payment.total_amount = 385
+        mock_payment.telegram_payment_charge_id = "charge_dup"
+
+        msg = MockMessage(text=None, user_id=42)
+        msg.successful_payment = mock_payment
+        await successful_payment(msg, db_client=mock_db_client)  # type: ignore[arg-type]
+
+        # record_payment was called
+        mock_db_client.record_payment.assert_called_once()
+        # activate_subscription was NOT called (duplicate payment)
+        mock_db_client.activate_subscription.assert_not_called()
+        # User still sees success (subscription already active from prior payment)
+        assert msg._last_answer is not None
+        assert "активирована" in msg._last_answer or "Спасибо" in msg._last_answer
