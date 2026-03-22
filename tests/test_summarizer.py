@@ -1,19 +1,18 @@
 """Tests for Summarizer service."""
 
-from __future__ import annotations
-
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from bot.services.summarizer import (
+import pytest
+
+from bot.conversation.summarizer import (
+    ArtifactReference,
+    FactCandidate,
     Summarizer,
     SummarizerConfig,
+    SummaryJSON,
     SummaryKind,
     SummaryResult,
-    SummaryJSON,
-    FactCandidate,
-    ArtifactReference,
     get_summarizer,
     set_summarizer,
 )

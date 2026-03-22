@@ -1,7 +1,5 @@
 """Tests for port protocol definitions."""
 
-from __future__ import annotations
-
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -14,7 +12,7 @@ class TestLLMPort:
 
     @pytest.mark.asyncio
     async def test_llm_service_satisfies_protocol(self) -> None:
-        from bot.services.llm_service import LLMService
+        from bot.llm.service import LLMService
 
         mock_model = MagicMock()
         mock_model.ainvoke = AsyncMock(
@@ -35,7 +33,7 @@ class TestLLMPort:
 
 
 class TestMemoryPort:
-    """Verify MemoryPort is structurally compatible with CogneeMemoryService."""
+    """Verify MemoryPort is structurally compatible with Mem0MemoryService."""
 
     @pytest.mark.asyncio
     async def test_mock_satisfies_protocol(self) -> None:

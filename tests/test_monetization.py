@@ -1,7 +1,6 @@
 """Tests for monetization features: rate limiting, usage tracking, cost estimation, payments."""
 
-from __future__ import annotations
-
+from contextlib import nullcontext
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -9,9 +8,9 @@ from uuid import uuid4
 import pytest
 from aiogram.types import Chat, User
 
-from bot.services.db_client import DatabaseClient
-from bot.services.llm_service import LLMResponse
-
+from bot.chat_pipeline import ChatPipeline
+from bot.infra.db_client import DatabaseClient
+from bot.llm.service import LLMResponse
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -251,12 +250,76 @@ class TestDbClientProvisioning:
 
 
 # ---------------------------------------------------------------------------
-# TestCostCalculation
+# TestDbClientRecordPayment
 # ---------------------------------------------------------------------------
 
 
+class TestDbClientRecordPayment:
+    """Tests for db_client.record_payment method."""
+
+    @pytest.mark.asyncio
+    async def test_record_payment_happy_path(self) -> None:
+        """RPC called with correct params for record_payment."""
+        mock_client = _make_mock_rpc()
+        db = DatabaseClient(client=mock_client)
+
+        await db.record_payment(
+            telegram_user_id=123,
+            amount_cents=385,
+            provider_payment_id="charge_123",
+        )
+
+        mock_client.rpc.assert_called_once_with(
+            "record_payment",
+            {
+                "p_user_id": 123,
+                "p_amount_cents": 385,
+                "p_provider_payment_id": "charge_123",
+                "p_status": "succeeded",
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_record_payment_duplicate_idempotent(self) -> None:
+        """Calling record_payment twice with same provider_payment_id does not raise.
+
+        ON CONFLICT DO NOTHING is server-side; from the client both calls succeed.
+        """
+        mock_client = _make_mock_rpc()
+        db = DatabaseClient(client=mock_client)
+
+        await db.record_payment(
+            telegram_user_id=123,
+            amount_cents=385,
+            provider_payment_id="charge_dup",
+        )
+        await db.record_payment(
+            telegram_user_id=123,
+            amount_cents=385,
+            provider_payment_id="charge_dup",
+        )
+
+        assert mock_client.rpc.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_record_payment_error_swallowed(self) -> None:
+        """RPC raises -> warning logged, no exception raised."""
+        mock_client = MagicMock()
+        mock_execute = MagicMock()
+        mock_execute.execute = MagicMock(side_effect=RuntimeError("db write failed"))
+        mock_client.rpc = MagicMock(return_value=mock_execute)
+        db = DatabaseClient(client=mock_client)
+
+        # Should NOT raise
+        await db.record_payment(
+            telegram_user_id=123,
+            amount_cents=385,
+            provider_payment_id="charge_err",
+        )
+
+
 # ---------------------------------------------------------------------------
-# TestHandlerMonetization — fixtures & helpers
+# TestHandlerMonetization — fixtures
 # ---------------------------------------------------------------------------
 
 
@@ -266,6 +329,7 @@ def mock_episode_manager() -> AsyncMock:
     mgr.process_user_message = AsyncMock(return_value=_make_message_result())
     mgr.process_assistant_message = AsyncMock(return_value=_make_message_result())
     mgr.get_recent_messages = AsyncMock(return_value=[])
+    mgr.get_current_episode = AsyncMock(return_value=None)
     return mgr
 
 
@@ -313,73 +377,25 @@ def mock_db_client() -> AsyncMock:
 
 
 @pytest.fixture
-def patched_handlers(
+def mock_pipeline(
     mock_episode_manager: AsyncMock,
     mock_memory_service: AsyncMock,
     mock_llm_service: AsyncMock,
     mock_context_builder: MagicMock,
     mock_db_client: AsyncMock,
-) -> Any:
-    """Patch all service accessors used in handlers + chat_pipeline."""
-    with (
-        # handlers-level patches (episode manager, DB for /start and payment handlers)
-        patch(
-            "bot.handlers.get_episode_manager_service",
-            return_value=mock_episode_manager,
-        ),
-        patch(
-            "bot.handlers.DB_CLIENT_AVAILABLE",
-            True,
-        ),
-        patch(
-            "bot.handlers.get_db_client",
-            return_value=mock_db_client,
-        ),
-        # chat_pipeline-level patches (LLM, memory, context, DB for pipeline logic)
-        patch(
-            "bot.chat_pipeline.get_memory_service",
-            return_value=mock_memory_service,
-        ),
-        patch(
-            "bot.chat_pipeline.MEMORY_SERVICE_AVAILABLE",
-            True,
-        ),
-        patch(
-            "bot.chat_pipeline.get_llm_service",
-            return_value=mock_llm_service,
-        ),
-        patch(
-            "bot.chat_pipeline.get_context_builder",
-            return_value=mock_context_builder,
-        ),
-        patch(
-            "bot.chat_pipeline.get_system_prompt",
-            return_value="You are a helpful assistant.",
-        ),
-        patch(
-            "bot.chat_pipeline.DB_CLIENT_AVAILABLE",
-            True,
-        ),
-        patch(
-            "bot.chat_pipeline.get_db_client",
-            return_value=mock_db_client,
-        ),
-        patch(
-            "bot.chat_pipeline.IMAGE_SERVICE_AVAILABLE",
-            False,
-        ),
-        patch(
-            "bot.chat_pipeline.get_langfuse_service",
-            return_value=MagicMock(create_config=MagicMock(return_value={})),
-        ),
-    ):
-        yield {
-            "episode_manager": mock_episode_manager,
-            "memory_service": mock_memory_service,
-            "llm_service": mock_llm_service,
-            "context_builder": mock_context_builder,
-            "db_client": mock_db_client,
-        }
+) -> ChatPipeline:
+    """Create a ChatPipeline with all mock dependencies including db_client."""
+    mock_langfuse = MagicMock()
+    mock_langfuse.trace = MagicMock(return_value=nullcontext())
+
+    return ChatPipeline(
+        llm=mock_llm_service,
+        episode_manager=mock_episode_manager,
+        context_builder=mock_context_builder,
+        langfuse=mock_langfuse,
+        memory=mock_memory_service,
+        db_client=mock_db_client,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -391,62 +407,82 @@ class TestHandlerMonetization:
     """Tests for monetization wiring in handlers."""
 
     @pytest.mark.asyncio
-    async def test_chat_rate_limit_pass_continues(self, patched_handlers: dict[str, Any]) -> None:
+    async def test_chat_rate_limit_pass_continues(
+        self, mock_pipeline: ChatPipeline, mock_db_client: AsyncMock
+    ) -> None:
         """When rate limit check returns True, LLM is called normally."""
         from bot.handlers import chat
 
-        patched_handlers["db_client"].check_rate_limit = AsyncMock(return_value=True)
+        mock_db_client.check_rate_limit = AsyncMock(return_value=True)
 
         msg = MockMessage(text="Hello!", user_id=42)
-        await chat(msg)
+        with patch(
+            "bot.chat_pipeline.get_system_prompt",
+            return_value="You are a helpful assistant.",
+        ):
+            await chat(msg, pipeline=mock_pipeline)  # type: ignore[arg-type]
 
-        patched_handlers["llm_service"].generate.assert_called_once()
+        mock_pipeline._llm.generate.assert_called_once()
         assert msg._last_answer == "LLM reply text"
 
     @pytest.mark.asyncio
-    async def test_chat_rate_limit_blocked(self, patched_handlers: dict[str, Any]) -> None:
+    async def test_chat_rate_limit_blocked(
+        self, mock_pipeline: ChatPipeline, mock_db_client: AsyncMock
+    ) -> None:
         """When rate limit check returns False, limit message shown, no LLM call."""
         from bot.handlers import chat
 
-        patched_handlers["db_client"].check_rate_limit = AsyncMock(return_value=False)
+        mock_db_client.check_rate_limit = AsyncMock(return_value=False)
 
         msg = MockMessage(text="Hello!", user_id=42)
-        await chat(msg)
+        with patch(
+            "bot.chat_pipeline.get_system_prompt",
+            return_value="You are a helpful assistant.",
+        ):
+            await chat(msg, pipeline=mock_pipeline)  # type: ignore[arg-type]
 
         assert msg._last_answer is not None
         assert "лимит" in msg._last_answer
-        patched_handlers["llm_service"].generate.assert_not_called()
+        mock_pipeline._llm.generate.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_chat_rate_limit_error_fails_open(self, patched_handlers: dict[str, Any]) -> None:
+    async def test_chat_rate_limit_error_fails_open(
+        self, mock_pipeline: ChatPipeline, mock_db_client: AsyncMock
+    ) -> None:
         """When rate limit check raises, message proceeds (fail open)."""
         from bot.handlers import chat
 
-        patched_handlers["db_client"].check_rate_limit = AsyncMock(
-            side_effect=RuntimeError("db down")
-        )
+        mock_db_client.check_rate_limit = AsyncMock(side_effect=RuntimeError("db down"))
 
         msg = MockMessage(text="Hello!", user_id=42)
-        await chat(msg)
+        with patch(
+            "bot.chat_pipeline.get_system_prompt",
+            return_value="You are a helpful assistant.",
+        ):
+            await chat(msg, pipeline=mock_pipeline)  # type: ignore[arg-type]
 
         # LLM was still called despite rate limit error (fail open)
-        patched_handlers["llm_service"].generate.assert_called_once()
+        mock_pipeline._llm.generate.assert_called_once()
         assert msg._last_answer == "LLM reply text"
 
     @pytest.mark.asyncio
     async def test_chat_increments_usage_after_response(
-        self, patched_handlers: dict[str, Any]
+        self, mock_pipeline: ChatPipeline, mock_db_client: AsyncMock
     ) -> None:
         """After LLM response, increment_usage is called with token counts."""
         from bot.handlers import chat
 
-        patched_handlers["db_client"].check_rate_limit = AsyncMock(return_value=True)
+        mock_db_client.check_rate_limit = AsyncMock(return_value=True)
 
         msg = MockMessage(text="Hello!", user_id=42)
-        await chat(msg)
+        with patch(
+            "bot.chat_pipeline.get_system_prompt",
+            return_value="You are a helpful assistant.",
+        ):
+            await chat(msg, pipeline=mock_pipeline)  # type: ignore[arg-type]
 
-        patched_handlers["db_client"].increment_usage.assert_called_once()
-        call_kwargs = patched_handlers["db_client"].increment_usage.call_args
+        mock_db_client.increment_usage.assert_called_once()
+        call_kwargs = mock_db_client.increment_usage.call_args
         # Verify user_id is the first positional arg
         assert call_kwargs[0][0] == 42
         # Verify token counts are passed
@@ -454,26 +490,20 @@ class TestHandlerMonetization:
         assert call_kwargs[1]["tokens_out"] == 8
 
     @pytest.mark.asyncio
-    async def test_upgrade_sends_invoice(self, patched_handlers: dict[str, Any]) -> None:
+    async def test_upgrade_sends_invoice(self) -> None:
         """The /upgrade command sends a Telegram Stars invoice."""
-        try:
-            from bot.handlers import upgrade
-        except ImportError:
-            pytest.skip("upgrade handler not yet implemented")
+        from bot.handlers import upgrade
 
         msg = MockMessage(text="/upgrade", user_id=42)
-        await upgrade(msg)
+        await upgrade(msg)  # type: ignore[arg-type]
 
         assert msg._last_invoice is not None
         assert msg._last_invoice.get("currency") == "XTR"
 
     @pytest.mark.asyncio
-    async def test_pre_checkout_valid_plan(self, patched_handlers: dict[str, Any]) -> None:
+    async def test_pre_checkout_valid_plan(self) -> None:
         """Valid plan payload -> answer(ok=True)."""
-        try:
-            from bot.handlers import pre_checkout
-        except ImportError:
-            pytest.skip("pre_checkout handler not yet implemented")
+        from bot.handlers import pre_checkout
 
         query = AsyncMock()
         query.invoice_payload = "plan:plus"
@@ -488,12 +518,9 @@ class TestHandlerMonetization:
         assert call_kwargs[1].get("ok") is True or (call_kwargs[0] and call_kwargs[0][0] is True)
 
     @pytest.mark.asyncio
-    async def test_pre_checkout_invalid(self, patched_handlers: dict[str, Any]) -> None:
+    async def test_pre_checkout_invalid(self) -> None:
         """Invalid payload -> answer(ok=False)."""
-        try:
-            from bot.handlers import pre_checkout
-        except ImportError:
-            pytest.skip("pre_checkout handler not yet implemented")
+        from bot.handlers import pre_checkout
 
         query = AsyncMock()
         query.invoice_payload = "garbage"
@@ -508,12 +535,9 @@ class TestHandlerMonetization:
         assert call_kwargs[1].get("ok") is False or (call_kwargs[0] and call_kwargs[0][0] is False)
 
     @pytest.mark.asyncio
-    async def test_successful_payment_activates(self, patched_handlers: dict[str, Any]) -> None:
+    async def test_successful_payment_activates(self, mock_db_client: AsyncMock) -> None:
         """Successful payment -> activate_subscription called."""
-        try:
-            from bot.handlers import successful_payment
-        except ImportError:
-            pytest.skip("successful_payment handler not yet implemented")
+        from bot.handlers import successful_payment
 
         mock_payment = MagicMock()
         mock_payment.invoice_payload = "plan:plus"
@@ -522,9 +546,67 @@ class TestHandlerMonetization:
 
         msg = MockMessage(text=None, user_id=42)
         msg.successful_payment = mock_payment
-        await successful_payment(msg)
+        await successful_payment(msg, db_client=mock_db_client)  # type: ignore[arg-type]
 
-        patched_handlers["db_client"].activate_subscription.assert_called_once()
-        call_args = patched_handlers["db_client"].activate_subscription.call_args
+        mock_db_client.activate_subscription.assert_called_once()
+        call_args = mock_db_client.activate_subscription.call_args
         assert call_args[0][0] == 42  # telegram_user_id
         assert "plus" in call_args[0][1]  # plan_slug contains "plus"
+
+    @pytest.mark.asyncio
+    async def test_successful_payment_calls_record_before_activate(
+        self, mock_db_client: AsyncMock
+    ) -> None:
+        """record_payment is called BEFORE activate_subscription."""
+        from bot.handlers import successful_payment
+
+        call_order: list[str] = []
+
+        async def _record(**kw: object) -> bool:
+            call_order.append("record_payment")
+            return True  # new payment (not duplicate)
+
+        mock_db_client.record_payment = AsyncMock(side_effect=_record)
+        mock_db_client.activate_subscription = AsyncMock(
+            side_effect=lambda *a, **kw: call_order.append("activate_subscription")
+        )
+
+        mock_payment = MagicMock()
+        mock_payment.invoice_payload = "plan:plus"
+        mock_payment.currency = "XTR"
+        mock_payment.total_amount = 385
+        mock_payment.telegram_payment_charge_id = "charge_789"
+
+        msg = MockMessage(text=None, user_id=42)
+        msg.successful_payment = mock_payment
+        await successful_payment(msg, db_client=mock_db_client)  # type: ignore[arg-type]
+
+        assert call_order == ["record_payment", "activate_subscription"]
+
+    @pytest.mark.asyncio
+    async def test_successful_payment_duplicate_skips_activation(
+        self, mock_db_client: AsyncMock
+    ) -> None:
+        """When record_payment returns False (duplicate), activation is skipped."""
+        from bot.handlers import successful_payment
+
+        mock_db_client.record_payment = AsyncMock(return_value=False)
+        mock_db_client.activate_subscription = AsyncMock()
+
+        mock_payment = MagicMock()
+        mock_payment.invoice_payload = "plan:plus"
+        mock_payment.currency = "XTR"
+        mock_payment.total_amount = 385
+        mock_payment.telegram_payment_charge_id = "charge_dup"
+
+        msg = MockMessage(text=None, user_id=42)
+        msg.successful_payment = mock_payment
+        await successful_payment(msg, db_client=mock_db_client)  # type: ignore[arg-type]
+
+        # record_payment was called
+        mock_db_client.record_payment.assert_called_once()
+        # activate_subscription was NOT called (duplicate payment)
+        mock_db_client.activate_subscription.assert_not_called()
+        # User still sees success (subscription already active from prior payment)
+        assert msg._last_answer is not None
+        assert "активирована" in msg._last_answer or "Спасибо" in msg._last_answer

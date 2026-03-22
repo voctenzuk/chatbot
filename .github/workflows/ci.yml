@@ -2,43 +2,42 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
-    branches: [main, develop]
+    branches: [main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PYTHON_VERSION: '3.13'
+
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ['3.12']
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
 
       - name: Install dependencies
-        run: |
-          pip install -e ".[dev]"
-          pip install ruff pyright pytest
+        run: uv sync
 
       - name: Check formatting with ruff
-        run: ruff format --check .
+        run: uvx ruff format --check .
 
       - name: Lint with ruff
-        run: ruff check .
+        run: uvx ruff check .
 
       - name: Type check with pyright
-        run: pyright
+        run: uvx pyright
 
       - name: Run tests with pytest
-        run: pytest
+        run: uv run pytest --cov

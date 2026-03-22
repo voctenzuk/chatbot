@@ -1,6 +1,11 @@
 ---
 name: diagnose
-description: When the bot misbehaves, crashes, or produces unexpected responses
+description: >
+  Systematically diagnose bot-specific issues (config, wiring, handlers, memory, LLM).
+  Use when asked to "diagnose", "why is the bot broken", or "bot not responding".
+  Proactively use when the user reports bot-specific errors (memory not saving, episodes
+  not switching, LLM not responding, handler not firing). For general debugging use
+  /investigate instead; use this skill for domain-specific bot diagnostics.
 context: fork
 disable-model-invocation: true
 ---

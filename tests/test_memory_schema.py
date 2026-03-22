@@ -4,8 +4,9 @@ These tests verify that the database schema for threads, episodes,
 messages, and episode_summaries tables is correctly defined.
 """
 
-import pytest
 import os
+
+import pytest
 
 # Handle optional pytest-asyncio dependency
 try:
@@ -80,8 +81,8 @@ class TestTablesExist:
             result = await conn.fetchval(
                 """
                 SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
+                    SELECT FROM information_schema.tables
+                    WHERE table_schema = 'public'
                     AND table_name = 'threads'
                 )
                 """
@@ -94,8 +95,8 @@ class TestTablesExist:
             result = await conn.fetchval(
                 """
                 SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
+                    SELECT FROM information_schema.tables
+                    WHERE table_schema = 'public'
                     AND table_name = 'episodes'
                 )
                 """
@@ -108,8 +109,8 @@ class TestTablesExist:
             result = await conn.fetchval(
                 """
                 SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
+                    SELECT FROM information_schema.tables
+                    WHERE table_schema = 'public'
                     AND table_name = 'messages'
                 )
                 """
@@ -122,8 +123,8 @@ class TestTablesExist:
             result = await conn.fetchval(
                 """
                 SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
+                    SELECT FROM information_schema.tables
+                    WHERE table_schema = 'public'
                     AND table_name = 'episode_summaries'
                 )
                 """
@@ -543,15 +544,20 @@ class TestSmokeQueries:
             finally:
                 # Cleanup: delete test data in correct order
                 await conn.execute(
-                    "DELETE FROM episode_summaries WHERE episode_id IN (SELECT id FROM episodes WHERE thread_id IN (SELECT id FROM threads WHERE telegram_user_id = $1))",
+                    "DELETE FROM episode_summaries WHERE episode_id IN"
+                    " (SELECT id FROM episodes WHERE thread_id IN"
+                    " (SELECT id FROM threads WHERE telegram_user_id = $1))",
                     test_user_id,
                 )
                 await conn.execute(
-                    "DELETE FROM messages WHERE episode_id IN (SELECT id FROM episodes WHERE thread_id IN (SELECT id FROM threads WHERE telegram_user_id = $1))",
+                    "DELETE FROM messages WHERE episode_id IN"
+                    " (SELECT id FROM episodes WHERE thread_id IN"
+                    " (SELECT id FROM threads WHERE telegram_user_id = $1))",
                     test_user_id,
                 )
                 await conn.execute(
-                    "DELETE FROM episodes WHERE thread_id IN (SELECT id FROM threads WHERE telegram_user_id = $1)",
+                    "DELETE FROM episodes WHERE thread_id IN"
+                    " (SELECT id FROM threads WHERE telegram_user_id = $1)",
                     test_user_id,
                 )
                 await conn.execute("DELETE FROM threads WHERE telegram_user_id = $1", test_user_id)
@@ -606,11 +612,14 @@ class TestSmokeQueries:
             finally:
                 # Cleanup
                 await conn.execute(
-                    "DELETE FROM messages WHERE episode_id IN (SELECT id FROM episodes WHERE thread_id IN (SELECT id FROM threads WHERE telegram_user_id = $1))",
+                    "DELETE FROM messages WHERE episode_id IN"
+                    " (SELECT id FROM episodes WHERE thread_id IN"
+                    " (SELECT id FROM threads WHERE telegram_user_id = $1))",
                     test_user_id,
                 )
                 await conn.execute(
-                    "DELETE FROM episodes WHERE thread_id IN (SELECT id FROM threads WHERE telegram_user_id = $1)",
+                    "DELETE FROM episodes WHERE thread_id IN"
+                    " (SELECT id FROM threads WHERE telegram_user_id = $1)",
                     test_user_id,
                 )
                 await conn.execute("DELETE FROM threads WHERE telegram_user_id = $1", test_user_id)
@@ -647,11 +656,14 @@ class TestSmokeQueries:
             finally:
                 # Cleanup
                 await conn.execute(
-                    "DELETE FROM messages WHERE episode_id IN (SELECT id FROM episodes WHERE thread_id IN (SELECT id FROM threads WHERE telegram_user_id = $1))",
+                    "DELETE FROM messages WHERE episode_id IN"
+                    " (SELECT id FROM episodes WHERE thread_id IN"
+                    " (SELECT id FROM threads WHERE telegram_user_id = $1))",
                     test_user_id,
                 )
                 await conn.execute(
-                    "DELETE FROM episodes WHERE thread_id IN (SELECT id FROM threads WHERE telegram_user_id = $1)",
+                    "DELETE FROM episodes WHERE thread_id IN"
+                    " (SELECT id FROM threads WHERE telegram_user_id = $1)",
                     test_user_id,
                 )
                 await conn.execute("DELETE FROM threads WHERE telegram_user_id = $1", test_user_id)

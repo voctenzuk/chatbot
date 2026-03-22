@@ -3,20 +3,33 @@
 ## P1 — Critical
 
 ### Unit Economics Validation
-**What:** Посчитать реальную цену kimi-k2p5 за токен, настроить cost_cents трекинг, пересмотреть прайсинг по реальным данным.
-**Why:** При оценочных ценах даже Pro тиер ($9.99) может быть убыточным (~$36 себестоимость при 100 сообщ/день). Без реальных данных невозможно установить правильные цены.
-**Context:** `usage_tracking` уже трекает `tokens_input` и `tokens_output`. Нужно добавить `cost_cents` (принято в scope CEO review) и заполнять его реальными ценами API. Затем проанализировать данные и скорректировать тиеры/лимиты.
-**Effort:** S (CC ~15 min для трекинга, затем ручной анализ данных)
-**Depends on:** cost_cents tracking (в scope текущего плана)
+**What:** Проверить реальную цену kimi-k2p5 за токен против констант COST_PER_1M_INPUT/OUTPUT в `chat_pipeline.py`. После 1 недели данных — проанализировать cost_cents и скорректировать тиеры/лимиты.
+**Why:** При оценочных ценах даже Pro тиер ($9.99) может быть убыточным. Нужны реальные данные для правильного прайсинга.
+**Context:** `cost_cents NUMERIC(10,4)` уже трекается в `usage_tracking` (миграция 008). Константы: `COST_PER_1M_INPUT=0.15`, `COST_PER_1M_OUTPUT=0.60`. Image cost теперь приходит из `ImageResult.cost_cents` (по провайдеру). После накопления данных — сравнить с реальными API счетами (OpenRouter + kimi-k2p5).
+**Effort:** S (ручной анализ данных после 1 недели)
+**Depends on:** Character MVP (завершён)
 
 ## P2 — Important
 
-### /stats Command — Usage Dashboard
-**What:** Команда /stats показывает пользователю: сообщений сегодня (15/20), план (Free), дней вместе (12).
-**Why:** Делает лимит прозрачным, мотивирует апгрейд на платный тиер. Пользователь видит ценность и понимает что получит при апгрейде.
-**Context:** Данные уже есть в `usage_tracking` и `user_subscriptions`. Нужен handler для /stats + запрос к `get_user_usage_today()` SQL функции.
+### OpenRouter Image Cost Monitoring
+**What:** После 1 недели с FLUX/SeeDream, сравнить tracked `cost_cents` (provider из `ImageResult`) с реальным OpenRouter биллингом. Настроить spend alerts.
+**Why:** Новая внешняя API зависимость с per-image cost. При вирусном росте или abuse spend может резко вырасти.
+**Effort:** S (ручной анализ + OpenRouter dashboard)
+**Depends on:** Reference Images feature + 1 неделя данных
+
+### Subscription Expiry Cron Job
+**What:** Background job для пометки истёкших подписок `status='expired'` и отправки renewal reminders.
+**Why:** Сейчас RPCs проверяют `current_period_end >= NOW()` корректно, но `status` остаётся `'active'` навсегда. Для чистоты данных и renewal UX нужен cron.
+**Context:** `check_rate_limit` и `try_consume_photo` уже правильно фильтруют по периоду. `status='active'` с истёкшим периодом = функционально Free. Но без явного expiry: нет renewal reminders, грязные данные в analytics.
 **Effort:** S (CC ~15 min)
-**Depends on:** rate limiting и usage tracking (в scope текущего плана)
+**Depends on:** Launch readiness (завершён)
+
+### Payment Reconciliation Hardening
+**What:** Retry queue для failed `record_payment`, верификация против Telegram API, алерты на пропущенные записи.
+**Why:** `record_payment` — best-effort (warning-only при ошибке). Для 10 друзей OK, при масштабировании нужна гарантия записи для аудита/рефандов.
+**Context:** Текущий flow: `record_payment` → `activate_subscription`. Если `record_payment` RPC fails, payment record теряется но подписка не активируется (duplicate check returns False). Нужно: retry queue, reconciliation cron сверяющий Telegram Stars API с БД.
+**Effort:** M (CC ~30 min)
+**Depends on:** Launch readiness (завершён) + реальные платежи для тестирования
 
 ### Relationship Levels (Gamification)
 **What:** Использовать `relationship_depth` (0-10) из `memory_models.py`. По мере общения уровень растёт → бот становится теплее, отправляет больше фото, пишет чаще первым.
@@ -27,9 +40,29 @@
 
 ## P3 — Nice to Have
 
+### Graph Memory для mem0 (Apache AGE / Kuzu)
+**What:** Добавить graph memory backend к mem0 для multi-hop рассуждений о связях между фактами.
+**Why:** Vector-only поиск не находит косвенные связи ("Алиса работает с Бобом → Боб любит кофе → принести кофе Алисе для Боба"). Graph memory добавляет entity-relationship traversal.
+**Context:** mem0 поддерживает 6 graph backends: Neo4j, Memgraph, Kuzu (embedded), Apache AGE (Postgres extension), Neptune. Kuzu = zero infra. Но: +2x tokens per add(), баг с non-OpenAI providers для structuredLlm.
+**Effort:** M (CC ~30 min)
+**Depends on:** mem0 миграция (завершена)
+
+### Remove get_*()/set_*() Singletons from Services
+**What:** Удалить `get_*()` / `set_*()` из всех сервисов (llm_service, mem0_service, context_builder, langfuse_service, image_service, db_client, episode_manager). Все потребители уже используют constructor injection через `AppContext`.
+**Why:** Двойной DI (composition root + модульные синглтоны) создаёт риск split-brain — два разных экземпляра сервиса в одном процессе.
+**Context:** `ProactiveScheduler` всё ещё использует `get_*()` внутри методов. Нужно сначала рефакторить его на constructor injection, затем можно удалить все `get_*()/set_*()`.
+**Effort:** S (CC ~15 min)
+**Depends on:** Composition Root рефакторинг (завершён) + рефакторинг ProactiveScheduler
+
+### Sprite Expansion Pipeline
+**What:** Упростить добавление новых emotion sprites. Сейчас: сгенерировать через скрипт, загрузить в Supabase, обновить `SPRITE_EMOTIONS`, редеплой.
+**Why:** Если пользователи просят эмоции не из набора (angry, sleepy, excited), turnaround медленный (code change + deploy).
+**Effort:** S (CC ~15 min для admin скрипта)
+**Depends on:** Reference Images feature
+
 ### Scaling Path Documentation
-**What:** Документ с конкретными триггерами масштабирования: 100+ DAU → webhooks, 500+ DAU → отдельный proactive worker, 1000+ DAU → cognee worker.
+**What:** Документ с конкретными триггерами масштабирования: 100+ DAU → webhooks, 500+ DAU → отдельный proactive worker, 1000+ DAU → mem0 worker.
 **Why:** Текущая архитектура (polling, single process) работает на ~100 пользователей. Нужно знать заранее, когда и что менять.
-**Context:** Polling mode в aiogram, proactive scheduler в том же процессе, cognee in-process. Каждый из этих компонентов — потенциальное bottleneck.
+**Context:** Polling mode в aiogram, proactive scheduler в том же процессе, mem0 in-process. Каждый из этих компонентов — потенциальное bottleneck.
 **Effort:** S (CC ~15 min, это документ, не код)
 **Depends on:** ничего

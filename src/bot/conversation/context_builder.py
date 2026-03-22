@@ -8,13 +8,13 @@ memory sources:
 - Pruning based on relevance, size limits, and metadata filters
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages.utils import count_tokens_approximately, trim_messages
 from loguru import logger
 
 from bot.memory.models import MemoryCategory, MemoryFact, MemoryType
@@ -34,7 +34,7 @@ class ConversationMessage:
 
     role: MessageRole
     content: str
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
     metadata: dict[str, Any] = field(default_factory=dict)
     message_id: str = ""
 
@@ -51,13 +51,13 @@ class RunningSummary:
     """Running summary of conversation history."""
 
     content: str
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
     message_count: int = 0  # Number of messages summarized
     version: int = 1  # Summary version for tracking updates
 
     def is_stale(self, max_age_hours: int = 24) -> bool:
         """Check if summary is older than specified hours."""
-        age = datetime.now() - self.timestamp
+        age = datetime.now(tz=UTC) - self.timestamp
         return age.total_seconds() > max_age_hours * 3600
 
 
@@ -68,7 +68,7 @@ class ContextPart:
     content: str
     source: str  # e.g., "summary", "recent_messages", "semantic_memory"
     priority: int  # Higher = more important
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
     token_estimate: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -324,7 +324,7 @@ class ContextBuilder:
             content=content,
             source="recent_messages",
             priority=5,  # Medium priority
-            timestamp=recent[-1].timestamp if recent else datetime.now(),
+            timestamp=recent[-1].timestamp if recent else datetime.now(tz=UTC),
             token_estimate=token_estimate,
             metadata={"message_count": len(recent)},
         )
@@ -383,18 +383,18 @@ class ContextBuilder:
             content=content,
             source="semantic_memory",
             priority=7,  # High priority
-            timestamp=top_memories[0].timestamp if top_memories else datetime.now(),
+            timestamp=top_memories[0].timestamp if top_memories else datetime.now(tz=UTC),
             token_estimate=token_estimate,
             metadata={
                 "memory_count": len(top_memories),
                 "query": query,
-                "categories": list(set(m.memory_category.value for m in top_memories)),
+                "categories": list({m.memory_category.value for m in top_memories}),
             },
         )
 
     def build_artifact_surrogates_part(
         self,
-        surrogates: Optional[list[Any]],
+        surrogates: list[Any] | None,
     ) -> ContextPart | None:
         """Build context part from artifact text surrogates.
 
@@ -510,9 +510,7 @@ class ContextBuilder:
         )
 
         # Assemble final context
-        sections = []
-        for part in pruned_parts:
-            sections.append(part.content)
+        sections = [part.content for part in pruned_parts]
 
         result = "\n\n".join(sections)
 
@@ -565,19 +563,14 @@ class ContextBuilder:
 
         # Add recent messages as native chat messages (proper role separation)
         if recent_messages:
-            for msg in recent_messages[-self.config.max_recent_messages :]:
-                messages.append(msg.to_dict())
+            messages.extend(
+                msg.to_dict() for msg in recent_messages[-self.config.max_recent_messages :]
+            )
 
         return self._trim_final_messages(messages)
 
     def _trim_final_messages(self, messages: list[dict[str, str]]) -> list[dict[str, str]]:
         """Apply LangChain trim_messages as a final guardrail against overflow."""
-        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-        from langchain_core.messages.utils import (
-            count_tokens_approximately,
-            trim_messages,
-        )
-
         role_cls = {
             "system": SystemMessage,
             "assistant": AIMessage,

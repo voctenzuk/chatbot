@@ -1,11 +1,12 @@
 """Tests for ContextBuilder service."""
 
-import pytest
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
-from bot.services.context_builder import (
-    ContextBuilder,
+import pytest
+
+from bot.conversation.context_builder import (
     ContextAssemblyConfig,
+    ContextBuilder,
     ContextPart,
     ConversationMessage,
     MessageRole,
@@ -13,9 +14,9 @@ from bot.services.context_builder import (
     get_context_builder,
     set_context_builder,
 )
-from bot.services.memory_models import (
-    MemoryFact,
+from bot.memory.models import (
     MemoryCategory,
+    MemoryFact,
     MemoryType,
 )
 
@@ -76,7 +77,7 @@ class TestRunningSummary:
 
     def test_is_stale_true(self):
         """Test is_stale returns True for old summary."""
-        old_time = datetime.now() - timedelta(hours=25)
+        old_time = datetime.now(tz=UTC) - timedelta(hours=25)
         summary = RunningSummary(
             content="Old summary",
             timestamp=old_time,
@@ -86,7 +87,7 @@ class TestRunningSummary:
 
     def test_is_stale_false(self):
         """Test is_stale returns False for recent summary."""
-        recent_time = datetime.now() - timedelta(hours=1)
+        recent_time = datetime.now(tz=UTC) - timedelta(hours=1)
         summary = RunningSummary(
             content="Recent summary",
             timestamp=recent_time,
@@ -247,7 +248,7 @@ class TestMemorySorting:
     @pytest.fixture
     def unsorted_memories(self):
         """Create memories with varying importance for sorting tests."""
-        base_time = datetime.now()
+        base_time = datetime.now(tz=UTC)
         return [
             MemoryFact(
                 content="Low importance",
@@ -798,9 +799,9 @@ class TestBuildArtifactSurrogatesPart:
     @pytest.fixture
     def sample_surrogates(self):
         """Create sample surrogates for testing."""
-        from bot.services.artifact_service import (
-            TextSurrogateForContext,
+        from bot.media.artifact_service import (
             ArtifactType,
+            TextSurrogateForContext,
             TextSurrogateKind,
         )
 
@@ -869,9 +870,9 @@ class TestBuildArtifactSurrogatesPart:
 
     def test_build_truncates_long_content(self):
         """Test that long surrogate content is truncated."""
-        from bot.services.artifact_service import (
-            TextSurrogateForContext,
+        from bot.media.artifact_service import (
             ArtifactType,
+            TextSurrogateForContext,
             TextSurrogateKind,
         )
 
@@ -900,9 +901,9 @@ class TestBuildArtifactSurrogatesPart:
 
     def test_build_prioritizes_surrogates(self):
         """Test that surrogates are included in priority order."""
-        from bot.services.artifact_service import (
-            TextSurrogateForContext,
+        from bot.media.artifact_service import (
             ArtifactType,
+            TextSurrogateForContext,
             TextSurrogateKind,
         )
 
@@ -937,9 +938,9 @@ class TestAssembleWithArtifactSurrogates:
 
     def test_assemble_includes_surrogates(self):
         """Test that assemble includes artifact surrogates."""
-        from bot.services.artifact_service import (
-            TextSurrogateForContext,
+        from bot.media.artifact_service import (
             ArtifactType,
+            TextSurrogateForContext,
             TextSurrogateKind,
         )
 
@@ -967,9 +968,9 @@ class TestAssembleWithArtifactSurrogates:
 
     def test_assemble_order_with_surrogates(self):
         """Test that surrogates appear in correct order."""
-        from bot.services.artifact_service import (
-            TextSurrogateForContext,
+        from bot.media.artifact_service import (
             ArtifactType,
+            TextSurrogateForContext,
             TextSurrogateKind,
         )
 
@@ -1007,9 +1008,9 @@ class TestAssembleForLLMWithSurrogates:
 
     def test_assemble_for_llm_includes_surrogates(self):
         """Test that assemble_for_llm includes artifact surrogates."""
-        from bot.services.artifact_service import (
-            TextSurrogateForContext,
+        from bot.media.artifact_service import (
             ArtifactType,
+            TextSurrogateForContext,
             TextSurrogateKind,
         )
 

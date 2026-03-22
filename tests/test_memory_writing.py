@@ -2,12 +2,11 @@
 
 After LLM responds, the conversation turn (user message + bot reply) is
 written to the memory service via a background task (_write_memory_background).
-Cognify is triggered periodically after N writes.
+mem0 extracts facts automatically during write — no separate cognify step.
 """
 
-from __future__ import annotations
-
 import asyncio
+from contextlib import nullcontext
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -15,8 +14,8 @@ from uuid import uuid4
 import pytest
 from aiogram.types import Chat, User
 
-from bot.services.llm_service import LLMResponse
-
+from bot.chat_pipeline import ChatPipeline
+from bot.llm.service import LLMResponse
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -24,11 +23,7 @@ from bot.services.llm_service import LLMResponse
 
 
 async def _drain_tasks() -> None:
-    """Yield control so that pending ``asyncio.create_task`` tasks complete.
-
-    Multiple iterations handle nested tasks (e.g. ``_write_memory_background``
-    spawns ``_run_cognify_background`` via another ``create_task``).
-    """
+    """Yield control so that pending ``asyncio.create_task`` tasks complete."""
     for _ in range(5):
         await asyncio.sleep(0)
 
@@ -114,6 +109,7 @@ def mock_episode_manager() -> AsyncMock:
     mgr.process_user_message = AsyncMock(return_value=_make_message_result())
     mgr.process_assistant_message = AsyncMock(return_value=_make_message_result())
     mgr.get_recent_messages = AsyncMock(return_value=[])
+    mgr.get_current_episode = AsyncMock(return_value=None)
     return mgr
 
 
@@ -162,70 +158,46 @@ def mock_db_client() -> AsyncMock:
 
 
 @pytest.fixture
-def patched_handlers(
+def pipeline_with_memory(
     mock_episode_manager: AsyncMock,
     mock_memory_service: AsyncMock,
     mock_llm_service: AsyncMock,
     mock_context_builder: MagicMock,
     mock_db_client: AsyncMock,
-) -> Any:
-    """Patch all service accessors used in handlers and chat_pipeline."""
-    mock_langfuse_service = MagicMock()
-    mock_langfuse_service.create_config = MagicMock(return_value={})
-    mock_episode_manager.get_current_episode = AsyncMock(return_value=None)
-    with (
-        patch(
-            "bot.handlers.get_episode_manager_service",
-            new=AsyncMock(return_value=mock_episode_manager),
-        ),
-        patch(
-            "bot.chat_pipeline.get_memory_service",
-            return_value=mock_memory_service,
-        ),
-        patch(
-            "bot.chat_pipeline.get_llm_service",
-            return_value=mock_llm_service,
-        ),
-        patch(
-            "bot.chat_pipeline.get_context_builder",
-            return_value=mock_context_builder,
-        ),
-        patch(
-            "bot.chat_pipeline.get_system_prompt",
-            return_value="You are a helpful assistant.",
-        ),
-        patch(
-            "bot.chat_pipeline.get_langfuse_service",
-            return_value=mock_langfuse_service,
-        ),
-        patch(
-            "bot.chat_pipeline.MEMORY_SERVICE_AVAILABLE",
-            True,
-        ),
-        patch(
-            "bot.handlers.DB_CLIENT_AVAILABLE",
-            True,
-        ),
-        patch(
-            "bot.chat_pipeline.DB_CLIENT_AVAILABLE",
-            True,
-        ),
-        patch(
-            "bot.handlers.get_db_client",
-            return_value=mock_db_client,
-        ),
-        patch(
-            "bot.chat_pipeline.get_db_client",
-            return_value=mock_db_client,
-        ),
-    ):
-        yield {
-            "episode_manager": mock_episode_manager,
-            "memory_service": mock_memory_service,
-            "llm_service": mock_llm_service,
-            "context_builder": mock_context_builder,
-            "db_client": mock_db_client,
-        }
+) -> ChatPipeline:
+    """Create a ChatPipeline with memory service for testing memory writes."""
+    mock_langfuse = MagicMock()
+    mock_langfuse.trace = MagicMock(return_value=nullcontext())
+
+    return ChatPipeline(
+        llm=mock_llm_service,
+        episode_manager=mock_episode_manager,
+        context_builder=mock_context_builder,
+        langfuse=mock_langfuse,
+        memory=mock_memory_service,
+        db_client=mock_db_client,
+    )
+
+
+@pytest.fixture
+def pipeline_without_memory(
+    mock_episode_manager: AsyncMock,
+    mock_llm_service: AsyncMock,
+    mock_context_builder: MagicMock,
+    mock_db_client: AsyncMock,
+) -> ChatPipeline:
+    """Create a ChatPipeline without memory service."""
+    mock_langfuse = MagicMock()
+    mock_langfuse.trace = MagicMock(return_value=nullcontext())
+
+    return ChatPipeline(
+        llm=mock_llm_service,
+        episode_manager=mock_episode_manager,
+        context_builder=mock_context_builder,
+        langfuse=mock_langfuse,
+        memory=None,
+        db_client=mock_db_client,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -236,24 +208,21 @@ def patched_handlers(
 class TestMemoryWriting:
     """Tests for memory writing in chat handler."""
 
-    @pytest.fixture(autouse=True)
-    def reset_memory_counters(self):
-        """Reset memory write counters between tests."""
-        from bot.chat_pipeline import _memory_write_counts
-
-        _memory_write_counts.clear()
-        yield
-        _memory_write_counts.clear()
-
     @pytest.mark.asyncio
     async def test_chat_writes_memory_after_response(
-        self, patched_handlers: dict[str, Any]
+        self,
+        pipeline_with_memory: ChatPipeline,
+        mock_memory_service: AsyncMock,
     ) -> None:
         """After LLM response, conversation is written to memory service via background task."""
         from bot.handlers import chat
 
         msg = MockMessage(text="I love cats", user_id=42)
-        await chat(msg)
+        with patch(
+            "bot.chat_pipeline.get_system_prompt",
+            return_value="You are a helpful assistant.",
+        ):
+            await chat(msg, pipeline=pipeline_with_memory)  # type: ignore[arg-type]
 
         # Let background tasks (asyncio.create_task) run
         await _drain_tasks()
@@ -262,8 +231,8 @@ class TestMemoryWriting:
         assert msg._last_answer == "test reply"
 
         # Memory write should have been called with content containing user + bot text
-        patched_handlers["memory_service"].write_factual.assert_called_once()
-        call_kwargs = patched_handlers["memory_service"].write_factual.call_args
+        mock_memory_service.write_factual.assert_called_once()
+        call_kwargs = mock_memory_service.write_factual.call_args
         written_content = call_kwargs[1].get("content", call_kwargs[0][0] if call_kwargs[0] else "")
         assert "I love cats" in written_content
         assert "test reply" in written_content
@@ -274,17 +243,23 @@ class TestMemoryWriting:
 
     @pytest.mark.asyncio
     async def test_chat_memory_write_error_swallowed(
-        self, patched_handlers: dict[str, Any]
+        self,
+        pipeline_with_memory: ChatPipeline,
+        mock_memory_service: AsyncMock,
     ) -> None:
         """Memory write error is logged but doesn't break the response."""
         from bot.handlers import chat
 
-        patched_handlers["memory_service"].write_factual = AsyncMock(
+        mock_memory_service.write_factual = AsyncMock(
             side_effect=RuntimeError("memory write failed")
         )
 
         msg = MockMessage(text="hello there", user_id=42)
-        await chat(msg)
+        with patch(
+            "bot.chat_pipeline.get_system_prompt",
+            return_value="You are a helpful assistant.",
+        ):
+            await chat(msg, pipeline=pipeline_with_memory)  # type: ignore[arg-type]
 
         # Let background tasks run (the error is swallowed inside the task)
         await _drain_tasks()
@@ -293,74 +268,49 @@ class TestMemoryWriting:
         assert msg._last_answer == "test reply"
 
     @pytest.mark.asyncio
-    async def test_chat_cognify_triggered_after_n_writes(
-        self, patched_handlers: dict[str, Any]
-    ) -> None:
-        """After N writes, cognify() is triggered via asyncio.create_task."""
-        from bot.handlers import chat
-
-        with patch("bot.chat_pipeline._COGNIFY_EVERY_N_WRITES", 2):
-            # First message — write_factual called, counter at 1 (no cognify)
-            msg1 = MockMessage(text="first message", user_id=42)
-            await chat(msg1)
-            await _drain_tasks()
-            patched_handlers["memory_service"].cognify.assert_not_called()
-
-            # Second message — counter reaches 2, cognify triggered
-            msg2 = MockMessage(text="second message", user_id=42)
-            await chat(msg2)
-            await _drain_tasks()
-            patched_handlers["memory_service"].cognify.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_chat_cognify_not_triggered_before_n(
-        self, patched_handlers: dict[str, Any]
-    ) -> None:
-        """Before N writes, cognify is NOT triggered."""
-        from bot.handlers import chat
-
-        with patch("bot.chat_pipeline._COGNIFY_EVERY_N_WRITES", 10):
-            msg = MockMessage(text="just one message", user_id=42)
-            await chat(msg)
-            await _drain_tasks()
-
-            # Only 1 write, threshold is 10 — no cognify
-            patched_handlers["memory_service"].cognify.assert_not_called()
-
-    @pytest.mark.asyncio
     async def test_chat_no_memory_write_when_service_unavailable(
-        self, patched_handlers: dict[str, Any]
+        self,
+        pipeline_without_memory: ChatPipeline,
+        mock_memory_service: AsyncMock,
     ) -> None:
         """When memory service is not available, no write attempt is made."""
         from bot.handlers import chat
 
-        with patch("bot.chat_pipeline.MEMORY_SERVICE_AVAILABLE", False):
-            msg = MockMessage(text="hello", user_id=42)
-            await chat(msg)
+        msg = MockMessage(text="hello", user_id=42)
+        with patch(
+            "bot.chat_pipeline.get_system_prompt",
+            return_value="You are a helpful assistant.",
+        ):
+            await chat(msg, pipeline=pipeline_without_memory)  # type: ignore[arg-type]
 
-            # Bot still responds normally
-            assert msg._last_answer == "test reply"
+        # Bot still responds normally
+        assert msg._last_answer == "test reply"
 
-            # write_factual should NOT have been called
-            patched_handlers["memory_service"].write_factual.assert_not_called()
+        # write_factual should NOT have been called (memory is None on the pipeline)
+        mock_memory_service.write_factual.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_chat_no_memory_write_on_llm_failure(
-        self, patched_handlers: dict[str, Any]
+        self,
+        pipeline_with_memory: ChatPipeline,
+        mock_memory_service: AsyncMock,
+        mock_llm_service: AsyncMock,
     ) -> None:
         """When LLM fails (fallback response), no memory write."""
         from bot.handlers import chat
 
-        patched_handlers["llm_service"].generate = AsyncMock(
-            side_effect=RuntimeError("LLM exploded")
-        )
+        mock_llm_service.generate = AsyncMock(side_effect=RuntimeError("LLM exploded"))
 
         msg = MockMessage(text="hello", user_id=42)
-        await chat(msg)
+        with patch(
+            "bot.chat_pipeline.get_system_prompt",
+            return_value="You are a helpful assistant.",
+        ):
+            await chat(msg, pipeline=pipeline_with_memory)  # type: ignore[arg-type]
 
         # Bot should have responded with fallback
         assert msg._last_answer is not None
         assert "Прости" in msg._last_answer or "не получается" in msg._last_answer
 
         # No memory write when LLM failed (llm_response is None)
-        patched_handlers["memory_service"].write_factual.assert_not_called()
+        mock_memory_service.write_factual.assert_not_called()

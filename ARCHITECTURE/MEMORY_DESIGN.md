@@ -1,6 +1,6 @@
 # MEMORY_DESIGN — “Human-like” Memory for the Telegram Bot
 
-**Status:** design draft (implementation roadmap included)  
+**Status:** implemented (original design draft, migrated from Cognee to mem0)
 **Scope:** memory only (text + attachments). Payments/subscriptions are out of scope except for metadata/limits.
 
 ## Goals
@@ -16,7 +16,7 @@
 ---
 
 ## Conceptual Model
-We implement **four product layers**, and map them onto **mem0’s memory types**.
+We implement **four product layers**, backed by **mem0** for knowledge-graph memory.
 
 ### Product Layers (canonical in our app)
 1) **Working memory (short-term)**
@@ -31,19 +31,19 @@ We implement **four product layers**, and map them onto **mem0’s memory types*
 
 3) **Semantic long-term memory**
    - durable “memory units” (facts, preferences, decisions)
-   - vector search for recall
+   - vector search + knowledge graph via mem0
 
 4) **Artifacts (attachments)**
    - stored as objects + derived text representations (vision/OCR/transcripts/summaries/chunks)
    - searchable independently
 
-### Mapping to mem0 types
-mem0 has: **Working / Factual / Episodic / Semantic**.
+### Mapping to mem0
+mem0 provides: **automatic fact extraction** (via `mem0.add()`) + **conflict resolution** (ADD/UPDATE/DELETE) + **vector search** (via `mem0.search()`).
 
-- **Our working memory** stays primarily in our DB (fast, deterministic). Optionally mirrored to mem0 with `run_id`.
-- **Our episode summaries** map to **mem0 Episodic** (write summaries, not raw logs).
-- **Our durable memory units** map to **mem0 Factual** (primary) and optionally Semantic.
-- **Artifacts** remain in our DB+storage; only high-level conclusions are written to mem0.
+- **Our working memory** stays in our DB (fast, deterministic). Not stored in mem0.
+- **Our episode summaries** and conversation pairs are written to mem0 (per-user: `tg_user_{user_id}`).
+- **Our durable memory units** are auto-extracted as structured facts by mem0's LLM pipeline.
+- **Artifacts** remain in our DB+storage; only high-level conclusions may be written to mem0.
 
 ---
 
@@ -53,9 +53,9 @@ We standardize ids for consistent retrieval.
 - `user_id` = Telegram user id (stable)
 - `thread_id` = one conversational stream per user/chat (stable)
 - `episode_id` = one “chapter” within thread (changes over time)
-- `run_id` (mem0) = **episode_id** (1:1 mapping)
+- `user_id` (mem0) = `tg_user_{user_id}` (per-user isolation)
 
-**Rule:** All mem0 writes MUST include `user_id` and SHOULD include `run_id`.
+**Rule:** All mem0 writes MUST use `user_id=f"tg_user_{user_id}"` for per-user data isolation.
 
 ---
 
@@ -144,7 +144,7 @@ We standardize ids for consistent retrieval.
 On close:
 - generate **final summary**
 - extract **memory units** (facts to remember)
-- write to mem0 (factual + episodic)
+- write to mem0 (knowledge graph)
 
 ---
 
@@ -165,42 +165,37 @@ For long episodes:
 ### 3) Final episode summary
 On episode close:
 - produce structured JSON + short text
-- extract `facts_candidates` for mem0
+- extract `facts_candidates` for long-term memory
 
 **Extraction model settings:** temperature ≤ 0.2.
 
 ---
 
-## mem0 Integration (OSS + pgvector)
-We use mem0 as a **long-term memory engine**.
+## mem0 Integration (Automatic Fact Extraction + Vector Search)
+We use mem0 as a **long-term memory engine** with automatic fact extraction and conflict resolution.
 
-### What we delegate to mem0
-- fact extraction + dedup + conflict resolution (**`infer=True`**)
-- semantic search + memory merging
-- metadata filtering
+### What mem0 provides
+- Automatic fact extraction from conversation via LLM (Russian-language prompt)
+- Conflict resolution: "latest truth wins" (ADD/UPDATE/DELETE decisions by LLM)
+- Vector similarity search via `mem0.search()`
+- Per-memory TTL/expiration (emotional 7d, session 30d, identity forever)
+- Deduplication of redundant facts
 
 ### What we implement ourselves
-- episode management (Telegram-specific)
-- attachments pipeline + artifact index
-- TTL/decay (mem0 does not provide this out of the box)
+- Episode management (Telegram-specific)
+- Attachments pipeline + artifact index
+- Russian extraction prompt with companion categories
+- TTL classification by content keywords
 
-### Write policy (selective)
-We do **not** store every message.
+### Write policy
+Every conversation pair (user message + bot response) goes through `write_factual()`.
+mem0's LLM pipeline automatically extracts relevant facts and ignores filler.
 
-We store:
-- user preferences, stable facts
-- confirmed decisions / agreements
-- important episodic summaries (final summary)
-
-We ignore:
-- greetings, filler
-- speculative/uncertain info
-- transient chatter
-
-### Recommended mem0 usage
-- **Factual**: write extracted “memory units” with metadata.
-- **Episodic**: write final episode summary with `run_id`.
-- **Working**: keep in DB; optional mirror to mem0 if needed.
+### Implementation details
+- `Mem0MemoryService` wraps all mem0 operations via `AsyncMemory` client
+- `cognify()` is a no-op (mem0 extracts automatically on `add()`)
+- Search returns `MemoryFact` objects with actual metadata (not hardcoded defaults)
+- Supabase pgvector as vector store with HNSW index
 
 ---
 
@@ -217,8 +212,8 @@ We follow a **dual-memory read flow** (production pattern):
    - last `N` messages
    - short artifact surrogates
 2) In parallel, query mem0:
-   - `mem0.search(user_id, query, filters)`
-   - filters include `project`, optionally `thread_id`
+   - `mem0_service.search(query, user_id, limit=5)`
+   - searches within user's memories (`tg_user_{user_id}`)
 3) If user asks about an attachment:
    - retrieve from `artifact_text` index (pgvector)
 4) Assemble prompt:
@@ -260,9 +255,16 @@ A build is considered correct when:
 - Prompts stay within budget via summaries + top-K retrieval.
 - Long-term recall works for durable facts/decisions.
 - Attachments are retrievable and referenced via text surrogates.
-- mem0 storage does not bloat (selective write + future TTL).
+- mem0 storage does not bloat (selective write + TTL/decay maintenance).
 
 ---
 
-## Implementation Roadmap (high level)
-See `docs/roadmap/MEMORY_ROADMAP.md` and tasks in `docs/tasks/memory/*`.
+## Implementation Status
+
+All core memory features are implemented:
+- Episode management with auto-switching (time gap + topic shift) — `conversation/episode_manager.py`
+- Running/chunk/final summarization — `conversation/summarizer.py`
+- mem0-backed semantic memory — `memory/mem0_service.py`
+- TTL/decay cleanup — `memory/cleanup.py`
+- Artifact pipeline — `media/artifact_service.py`
+- Dual-memory context building — `conversation/context_builder.py`

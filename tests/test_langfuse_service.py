@@ -1,12 +1,10 @@
 """Tests for Langfuse observability service."""
 
-from __future__ import annotations
-
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from bot.services.langfuse_service import (
+from bot.infra.langfuse_service import (
     LangfuseService,
     get_langfuse_service,
     set_langfuse_service,
@@ -26,69 +24,93 @@ class TestLangfuseServiceInit:
     def test_initializes_with_settings(self):
         """Service creates Langfuse client from settings."""
         with (
-            patch("bot.services.langfuse_service.settings") as mock_settings,
-            patch("bot.services.langfuse_service.Langfuse") as mock_langfuse,
+            patch("bot.infra.langfuse_service.settings") as mock_settings,
+            patch("bot.infra.langfuse_service.Langfuse") as mock_langfuse,
         ):
             mock_settings.langfuse_enabled = True
             mock_settings.langfuse_public_key = "pk-test"
-            mock_settings.langfuse_secret_key = "sk-test"
+            mock_settings.langfuse_secret_key = "sk-test"  # noqa: S105
             mock_settings.langfuse_base_url = "https://cloud.langfuse.com"
 
             LangfuseService()
 
             mock_langfuse.assert_called_once_with(
                 public_key="pk-test",
-                secret_key="sk-test",
+                secret_key="sk-test",  # noqa: S106
                 host="https://cloud.langfuse.com",
             )
 
 
-class TestCreateConfig:
-    """Tests for config creation."""
+class TestTrace:
+    """Tests for trace() context manager."""
 
-    def test_returns_callbacks(self):
-        """Returns config with callbacks list."""
+    def test_trace_calls_propagate_attributes(self):
+        """trace() wraps propagate_attributes with correct args."""
         with (
-            patch("bot.services.langfuse_service.settings") as mock_settings,
-            patch("bot.services.langfuse_service.Langfuse"),
-            patch("bot.services.langfuse_service.CallbackHandler") as mock_handler,
+            patch("bot.infra.langfuse_service.settings") as mock_settings,
+            patch("bot.infra.langfuse_service.Langfuse"),
+            patch("bot.infra.langfuse_service.propagate_attributes") as mock_prop,
         ):
-            mock_settings.langfuse_enabled = True
             mock_settings.langfuse_public_key = "pk-test"
-            mock_settings.langfuse_secret_key = "sk-test"
+            mock_settings.langfuse_secret_key = "sk-test"  # noqa: S105
             mock_settings.langfuse_base_url = "https://cloud.langfuse.com"
 
             svc = LangfuseService()
-            config = svc.create_config(
+            with svc.trace(
                 user_id=123,
+                session_id="ep_456",
+                trace_name="chat",
+                tags=["test"],
+            ):
+                pass
+
+            mock_prop.assert_called_once_with(
+                user_id="123",
                 session_id="ep_456",
                 trace_name="chat",
                 tags=["test"],
             )
 
-            assert "callbacks" in config
-            assert len(config["callbacks"]) == 1
-            mock_handler.assert_called_once()
-
-    def test_handler_receives_user_id_and_session(self):
-        """CallbackHandler is created with user_id and session_id."""
+    def test_trace_converts_user_id_to_string(self):
+        """user_id int is converted to string for propagate_attributes."""
         with (
-            patch("bot.services.langfuse_service.settings") as mock_settings,
-            patch("bot.services.langfuse_service.Langfuse"),
-            patch("bot.services.langfuse_service.CallbackHandler") as mock_handler,
+            patch("bot.infra.langfuse_service.settings") as mock_settings,
+            patch("bot.infra.langfuse_service.Langfuse"),
+            patch("bot.infra.langfuse_service.propagate_attributes") as mock_prop,
         ):
             mock_settings.langfuse_public_key = "pk-test"
-            mock_settings.langfuse_secret_key = "sk-test"
-            mock_settings.langfuse_base_url = "https://test.com"
-            mock_settings.langfuse_enabled = True
+            mock_settings.langfuse_secret_key = "sk-test"  # noqa: S105
+            mock_settings.langfuse_base_url = "https://cloud.langfuse.com"
 
             svc = LangfuseService()
-            svc.create_config(user_id=42, session_id="ep_1", trace_name="chat")
+            with svc.trace(user_id=42):
+                pass
 
-            call_kwargs = mock_handler.call_args.kwargs
+            call_kwargs = mock_prop.call_args.kwargs
             assert call_kwargs["user_id"] == "42"
-            assert call_kwargs["session_id"] == "ep_1"
-            assert call_kwargs["trace_name"] == "chat"
+            assert isinstance(call_kwargs["user_id"], str)
+
+    def test_trace_defaults(self):
+        """trace() uses default trace_name and empty tags."""
+        with (
+            patch("bot.infra.langfuse_service.settings") as mock_settings,
+            patch("bot.infra.langfuse_service.Langfuse"),
+            patch("bot.infra.langfuse_service.propagate_attributes") as mock_prop,
+        ):
+            mock_settings.langfuse_public_key = "pk-test"
+            mock_settings.langfuse_secret_key = "sk-test"  # noqa: S105
+            mock_settings.langfuse_base_url = "https://cloud.langfuse.com"
+
+            svc = LangfuseService()
+            with svc.trace(user_id=1):
+                pass
+
+            mock_prop.assert_called_once_with(
+                user_id="1",
+                session_id=None,
+                trace_name="chat",
+                tags=[],
+            )
 
 
 class TestFlush:
@@ -97,12 +119,12 @@ class TestFlush:
     def test_flush_calls_client(self):
         """flush() calls client.flush() and shutdown()."""
         with (
-            patch("bot.services.langfuse_service.settings") as mock_settings,
-            patch("bot.services.langfuse_service.Langfuse") as mock_langfuse_cls,
+            patch("bot.infra.langfuse_service.settings") as mock_settings,
+            patch("bot.infra.langfuse_service.Langfuse") as mock_langfuse_cls,
         ):
             mock_settings.langfuse_enabled = True
             mock_settings.langfuse_public_key = "pk-test"
-            mock_settings.langfuse_secret_key = "sk-test"
+            mock_settings.langfuse_secret_key = "sk-test"  # noqa: S105
             mock_settings.langfuse_base_url = "https://cloud.langfuse.com"
 
             mock_client = MagicMock()
@@ -121,12 +143,12 @@ class TestSingleton:
     def test_set_and_get(self):
         """set then get returns same instance."""
         with (
-            patch("bot.services.langfuse_service.settings") as mock_settings,
-            patch("bot.services.langfuse_service.Langfuse"),
+            patch("bot.infra.langfuse_service.settings") as mock_settings,
+            patch("bot.infra.langfuse_service.Langfuse"),
         ):
             mock_settings.langfuse_enabled = True
             mock_settings.langfuse_public_key = "pk-test"
-            mock_settings.langfuse_secret_key = "sk-test"
+            mock_settings.langfuse_secret_key = "sk-test"  # noqa: S105
             mock_settings.langfuse_base_url = "https://cloud.langfuse.com"
 
             custom = LangfuseService()

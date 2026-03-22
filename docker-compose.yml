@@ -1,11 +1,19 @@
 services:
+  bot:
+    build: .
+    env_file: .env
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_started
+        required: false
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     command: ["redis-server", "--appendonly", "yes"]
+    restart: unless-stopped
     volumes:
       - redis_data:/data
-
+    profiles:
+      - with-redis
 volumes:
   redis_data:

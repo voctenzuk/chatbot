@@ -47,6 +47,5 @@ ARCHITECTURE/
 # Agents (generated, top-level only)
 /agents/
 
-# Lock files
-uv.lock
+# Lock files (uv.lock is tracked — needed for reproducible builds)
 .gstack/

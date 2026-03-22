@@ -4,7 +4,7 @@
 # -----------------------------------------------------------------------------
 # Stage 1: Builder (installs dependencies)
 # -----------------------------------------------------------------------------
-FROM python:3.12-slim AS builder
+FROM python:3.13-slim AS builder
 
 WORKDIR /build
 
@@ -30,7 +30,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime (minimal image)
 # -----------------------------------------------------------------------------
-FROM python:3.12-slim AS runtime
+FROM python:3.13-slim AS runtime
 
 WORKDIR /app
 
@@ -50,10 +50,10 @@ ENV PYTHONPATH=/app/src
 # Switch to non-root user
 USER botuser
 
-# Health check (adjust if bot exposes HTTP endpoint, otherwise remove)
-# For polling bots, we can use a simple Python check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import bot; print('OK')" || exit 1
+# Polling bot — no HTTP endpoint to probe.
+# PID 1 = bot process (no init system). If tini/dumb-init is added later, switch to heartbeat file.
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD python -c "import os; os.kill(1, 0)" || exit 1
 
 # Run the bot
 CMD ["python", "-m", "bot"]

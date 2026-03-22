@@ -1,17 +1,16 @@
 [build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+requires = ["uv_build>=0.7.19,<0.8"]
+build-backend = "uv_build"
 
 [project]
 name = "tg-virtual-girlfriend"
 version = "0.1.0"
 description = "Telegram chatbot (aiogram) with LangChain/LangGraph + cognee memory + image generation"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = [
   "aiogram>=3.4",
   "pydantic>=2.6",
   "pydantic-settings>=2.2",
-  "python-dotenv>=1.0",
   "httpx>=0.27",
   "tenacity>=8.2",
   "loguru>=0.7",
@@ -22,8 +21,8 @@ dependencies = [
   "langgraph>=0.2",
   # Observability
   "langfuse>=2.0",
-  # Memory (cognee knowledge graph)
-  "cognee>=0.1.21",
+  # Memory (mem0 fact extraction + vector search)
+  "mem0ai>=0.1",
   # Optional: storage
   "redis>=5.0",
   # Proactive messaging scheduler
@@ -32,6 +31,7 @@ dependencies = [
   "supabase>=2.0",
   # Math/ML utilities
   "numpy>=1.26",
+  "langchain>=1.2.13",
 ]
 
 [project.optional-dependencies]
@@ -39,33 +39,166 @@ images = [
   "openai>=1.40",
   "pillow>=10.0",
 ]
+
+[dependency-groups]
 dev = [
   "pytest>=8.0",
-  "pytest-asyncio>=0.23",
+  "pytest-asyncio>=1.0",
   "pytest-cov>=5.0",
-  "ruff>=0.6",
-  "pyright>=1.1",
 ]
 
 [project.scripts]
 bot = "bot.__main__:main"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.uv]
+default-groups = ["dev"]
 
-[tool.setuptools.package-dir]
-root = "src"
+[tool.uv.build-backend]
+module-name = "bot"
 
 [tool.ruff]
 line-length = 100
+target-version = "py313"
+src = ["src"]
+
+[tool.ruff.lint]
+select = [
+    # --- core ---
+    "F",      # pyflakes — undefined names, unused imports
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "I",      # isort — import sorting
+    "UP",     # pyupgrade — modernize to 3.13+ syntax
+    "B",      # bugbear — common bug patterns
+    "SIM",    # simplify — collapsible ifs, ternaries
+    "ASYNC",  # async anti-patterns — blocking calls, missing awaits
+    "C4",     # comprehensions — unnecessary list/dict calls
+    "PIE",    # misc anti-patterns — unnecessary pass, spread
+    "T20",    # print — catch stray print() in production code
+    "RUF",    # ruff-specific — mutable defaults, ambiguous chars
+    # --- modern Python / performance ---
+    "TC",     # type-checking imports — move type-only imports behind TYPE_CHECKING
+    "PERF",   # perflint — performance anti-patterns
+    "FURB",   # refurb — modern Python 3.13+ idioms
+    "FLY",    # flynt — prefer f-strings over .join/.format
+    "RSE",    # flake8-raise — unnecessary parens on bare raise
+    # --- correctness ---
+    "LOG",    # flake8-logging — stdlib logging misuse (catches accidental logging vs loguru)
+    "DTZ",    # flake8-datetimez — naive datetime without timezone
+    "PLE",    # pylint errors — real bug detection
+    "ISC",    # implicit string concatenation — missing commas
+    "A",      # flake8-builtins — shadowing built-in names
+    # --- code quality ---
+    "S",      # bandit — security (hardcoded passwords, eval, pickle)
+    "RET",    # flake8-return — return statement consistency
+    "PT",     # flake8-pytest-style — consistent pytest idioms
+]
+ignore = [
+    # --- existing ---
+    "B008",     # function-call-in-default-argument (pydantic Field() false positives)
+    "RUF001",   # ambiguous-unicode-character-string (Russian-language bot, Cyrillic is intentional)
+    "RUF005",   # collection-literal-concatenation (readability preference)
+    "RUF012",   # mutable-class-variable (pydantic model false positives)
+    "RUF059",   # unused-unpacked-variable (valid patterns like `done, _ = await asyncio.wait(...)`)
+    "SIM108",   # if-else-block-instead-of-if-exp (ternary not always clearer)
+    # --- performance ---
+    "PERF203",  # try-except-in-loop — irrelevant on 3.11+ (zero-cost exceptions)
+    # --- return ---
+    "RET504",   # unnecessary-assign-before-return — named vars aid debugging
+    "RET505",   # superfluous-else-return — explicit else can be clearer
+    # --- security ---
+    "S101",     # assert — used in tests (also per-file-ignored)
+    "S603",     # subprocess-without-shell — flags all subprocess usage
+    "S607",     # start-process-with-partial-path — same noise as S603
+    "S311",     # non-cryptographic-random — random is fine for non-security uses
+    # --- refurb ---
+    "FURB101",  # read-whole-file — context-manager style sometimes preferable
+    "FURB103",  # write-whole-file — same reasoning
+    "FURB118",  # reimplemented-operator — lambdas often more readable
+    # --- type-checking ---
+    "TC001",    # typing-only-first-party-import — too aggressive with Pydantic/DI
+    # --- implicit string concat ---
+    "ISC003",   # explicit-string-concatenation — style preference, not a bug
+    # --- pytest ---
+    "PT011",    # pytest-raises-too-broad — noisy when ValueError is sufficient
+    "PT013",    # pytest-incorrect-pytest-import — opinionated, no benefit
+]
+fixable = ["ALL"]
+unfixable = ["F841"]  # unused variables — don't auto-delete
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]                       # unused imports (re-exports)
+"tests/**" = ["T20", "S101"]                   # print + assert OK in tests
+"src/bot/scripts/**" = ["T20"]                 # print() is correct in CLI scripts
+
+[tool.ruff.lint.isort]
+known-first-party = ["bot"]
+
+[tool.ruff.lint.flake8-builtins]
+builtins-ignorelist = ["id", "type", "input"]
+
+[tool.ruff.format]
+docstring-code-format = true
 
 [tool.pyright]
+pythonVersion = "3.13"
+typeCheckingMode = "standard"
 venvPath = "."
 venv = ".venv"
-exclude = [
-    "src/bot/webhooks.py",  # Optional module with heavy dependencies (fastapi, stripe, paddle)
-]
+include = ["src"]
+useLibraryCodeForTypes = true
+# --- keep ---
+reportMissingTypeStubs = false
+reportUnnecessaryTypeIgnoreComment = "warning"
+reportUnnecessaryIsInstance = "warning"
+reportUnnecessaryCast = "warning"
+# --- upgraded ---
+reportMatchNotExhaustive = "error"
+# --- new: cherry-picked from strict ---
+reportDeprecated = "warning"
+reportDuplicateImport = "warning"
+reportConstantRedefinition = "warning"
+reportPrivateUsage = "warning"
+reportUnnecessaryComparison = "warning"
 
 [tool.pytest.ini_options]
+minversion = "8.0"
 testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+xfail_strict = true
+markers = [
+    "slow: tests taking >2s (skip with -m 'not slow')",
+    "integration: tests requiring external services",
+]
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning:aiogram",
+    "ignore::DeprecationWarning:langchain",
+    "ignore::DeprecationWarning:langchain_core",
+    "ignore::DeprecationWarning:langchain_community",
+    "ignore::DeprecationWarning:pydantic",
+    "ignore::DeprecationWarning:cognee",
+    "ignore::DeprecationWarning:httpx",
+    "ignore::DeprecationWarning:apscheduler",
+    "ignore::UserWarning:langchain",
+    "ignore::RuntimeWarning:unittest.mock",
+]
+
+[tool.coverage.run]
+source = ["src/bot"]
+branch = true
+omit = ["src/bot/__main__.py"]
+
+[tool.coverage.report]
+fail_under = 80
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "\\.\\.\\.",
+    "@(abc\\.)?abstractmethod",
+    "if __name__ == .__main__.",
+    "class .*\\bProtocol\\):",
+    "def __repr__",
+]

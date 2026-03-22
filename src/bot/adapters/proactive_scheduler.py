@@ -19,20 +19,24 @@ Architecture:
              Anti-spam → LLM generate → delivery.send_text
 """
 
-from __future__ import annotations
-
-from datetime import datetime, timedelta
+import importlib.util
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
 
 from bot.config import settings
-from bot.ports import MessageDeliveryPort
-from bot.llm.service import get_llm_service
+from bot.conversation.episode_manager import get_episode_manager
 from bot.conversation.system_prompt import get_system_prompt
+from bot.infra.db_client import get_db_client
+from bot.infra.langfuse_service import get_langfuse_service
+from bot.llm.service import get_llm_service
+from bot.ports import MessageDeliveryPort
 
-import importlib.util
+if TYPE_CHECKING:
+    from apscheduler.jobstores.base import BaseJobStore
 
 REDIS_JOBSTORE_AVAILABLE = importlib.util.find_spec("apscheduler.jobstores.redis") is not None
 
@@ -53,12 +57,12 @@ class ProactiveScheduler:
         self._delivery = delivery
         self._send_counts: dict[int, dict[str, int]] = {}
 
-        jobstores: dict[str, MemoryJobStore] = {}
+        jobstores: dict[str, BaseJobStore] = {}
         if REDIS_JOBSTORE_AVAILABLE and settings.redis_url:
             try:
                 from apscheduler.jobstores.redis import RedisJobStore as _RedisJobStore
 
-                jobstores["default"] = _RedisJobStore(url=settings.redis_url)  # type: ignore[assignment]
+                jobstores["default"] = _RedisJobStore(url=settings.redis_url)
                 logger.info("ProactiveScheduler using Redis job store")
             except Exception as e:
                 logger.warning("Redis job store failed, using memory: {}", e)
@@ -104,18 +108,18 @@ class ProactiveScheduler:
 
     def _is_quiet_hours(self) -> bool:
         """Check if current time is in quiet hours (23:00-08:00)."""
-        hour = datetime.now().hour
+        hour = datetime.now(tz=UTC).hour
         return hour >= _QUIET_HOUR_START or hour < _QUIET_HOUR_END
 
     def _check_anti_spam(self, user_id: int) -> bool:
         """Return True if user can receive more proactive messages today."""
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = datetime.now(tz=UTC).strftime("%Y-%m-%d")
         user_counts = self._send_counts.get(user_id, {})
         return user_counts.get(today, 0) < _MAX_PROACTIVE_PER_DAY
 
     def _record_send(self, user_id: int) -> None:
         """Record that a proactive message was sent to user."""
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = datetime.now(tz=UTC).strftime("%Y-%m-%d")
         if user_id not in self._send_counts:
             self._send_counts[user_id] = {}
         self._send_counts[user_id][today] = self._send_counts[user_id].get(today, 0) + 1
@@ -126,8 +130,6 @@ class ProactiveScheduler:
     async def _get_active_user_ids(self) -> list[int]:
         """Get list of active user IDs from the database."""
         try:
-            from bot.infra.db_client import get_db_client
-
             db = get_db_client()
             return await db.get_all_user_ids()
         except Exception as exc:
@@ -137,8 +139,6 @@ class ProactiveScheduler:
     async def _get_last_message_time(self, user_id: int) -> datetime | None:
         """Get the last message timestamp for a user."""
         try:
-            from bot.infra.db_client import get_db_client
-
             db = get_db_client()
             episode = await db.get_active_episode_for_user(user_id)
             if episode and hasattr(episode, "last_user_message_at"):
@@ -158,8 +158,6 @@ class ProactiveScheduler:
             return False
 
         try:
-            from bot.infra.langfuse_service import get_langfuse_service
-
             system_prompt = get_system_prompt()
             messages = [
                 {"role": "system", "content": system_prompt},
@@ -174,18 +172,16 @@ class ProactiveScheduler:
                 {"role": "user", "content": "(ожидает твоё сообщение)"},
             ]
 
-            lf_config = get_langfuse_service().create_config(
+            with get_langfuse_service().trace(
                 user_id=user_id,
                 trace_name="proactive",
                 tags=["proactive"],
-            )
-            llm_response = await get_llm_service().generate(messages, config=lf_config)
+            ):
+                llm_response = await get_llm_service().generate(messages)
             await self._delivery.send_text(chat_id=user_id, text=llm_response.content)
             self._record_send(user_id)
 
             try:
-                from bot.conversation.episode_manager import get_episode_manager
-
                 manager = get_episode_manager()
                 if manager.db is not None:
                     await manager.process_assistant_message(
@@ -222,7 +218,7 @@ class ProactiveScheduler:
     async def _idle_check(self) -> None:
         """Check for idle users and send 'miss you' messages."""
         user_ids = await self._get_active_user_ids()
-        threshold = datetime.now() - timedelta(hours=_IDLE_THRESHOLD_HOURS)
+        threshold = datetime.now(tz=UTC) - timedelta(hours=_IDLE_THRESHOLD_HOURS)
 
         for user_id in user_ids:
             last_msg = await self._get_last_message_time(user_id)

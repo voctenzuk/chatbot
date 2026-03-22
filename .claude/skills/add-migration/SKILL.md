@@ -1,6 +1,10 @@
 ---
 name: add-migration
-description: When creating or modifying database tables, columns, indexes, or RLS policies
+description: >
+  Create a SQL migration file for Supabase (tables, columns, indexes, RLS policies).
+  Use when asked to "add table", "create migration", "new column", or "schema change".
+  Proactively use when a feature requires new or modified DB tables — create the
+  migration file before writing service code that depends on the new schema.
 disable-model-invocation: true
 ---
 

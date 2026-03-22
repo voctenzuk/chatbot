@@ -1,12 +1,11 @@
 """Tests for ArtifactService and storage backend."""
 
-from __future__ import annotations
-
 import io
-import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
-from bot.services.artifact_service import (
+import pytest
+
+from bot.media.artifact_service import (
     Artifact,
     ArtifactProcessingStatus,
     ArtifactService,
@@ -18,7 +17,7 @@ from bot.services.artifact_service import (
     get_artifact_service,
     set_artifact_service,
 )
-from bot.services.storage_backend import (
+from bot.media.storage_backend import (
     LocalStorageBackend,
     StorageReference,
 )
@@ -726,10 +725,8 @@ class TestGlobalInstance:
         mock_storage = MagicMock()
 
         # Patch the get functions
-        monkeypatch.setattr("bot.services.artifact_service.get_db_client", lambda: mock_db)
-        monkeypatch.setattr(
-            "bot.services.artifact_service.get_storage_backend", lambda: mock_storage
-        )
+        monkeypatch.setattr("bot.media.artifact_service.get_db_client", lambda: mock_db)
+        monkeypatch.setattr("bot.media.artifact_service.get_storage_backend", lambda: mock_storage)
 
         service = get_artifact_service()
 

@@ -6,8 +6,6 @@ Only services where implementation swapping is realistic get a Protocol:
 - MessageDeliveryPort: swap delivery channel (Telegram, Web, CLI)
 """
 
-from __future__ import annotations
-
 from typing import Any, Protocol, runtime_checkable
 
 from bot.llm.service import LLMResponse

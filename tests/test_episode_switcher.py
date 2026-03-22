@@ -7,23 +7,21 @@ Tests cover:
 - Synthetic dialogue scenarios
 """
 
-from __future__ import annotations
-
-import pytest
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import numpy as np
+import pytest
 
-from bot.services.episode_switcher import (
+from bot.conversation.episode_switcher import (
+    _MAX_ARCHIVED_EPISODES_PER_USER,
+    Episode,
     EpisodeConfig,
     EpisodeManager,
-    SimpleEmbeddingProvider,
     Message,
-    Episode,
+    SimpleEmbeddingProvider,
     get_episode_manager,
     set_episode_manager,
-    _MAX_ARCHIVED_EPISODES_PER_USER,
 )
 
 
@@ -157,7 +155,7 @@ class TestEpisodeManagerBasic:
         message, decision = await manager.add_message(
             user_id=1,
             content="Hello!",
-            timestamp=datetime.now(),
+            timestamp=datetime.now(tz=UTC),
         )
 
         assert decision.should_switch is True
@@ -167,7 +165,7 @@ class TestEpisodeManagerBasic:
     @pytest.mark.asyncio
     async def test_consecutive_messages_same_episode(self, manager):
         """Test that consecutive messages stay in same episode."""
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
 
         # First message
         await manager.add_message(user_id=1, content="Hello!", timestamp=now)
@@ -186,7 +184,7 @@ class TestEpisodeManagerBasic:
     @pytest.mark.asyncio
     async def test_time_gap_trigger(self, manager):
         """Test that large time gap triggers new episode."""
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
 
         # First message
         await manager.add_message(user_id=1, content="Hello!", timestamp=now)
@@ -206,7 +204,7 @@ class TestEpisodeManagerBasic:
     @pytest.mark.asyncio
     async def test_anti_flap_min_duration(self, manager):
         """Test anti-flap minimum episode duration protection."""
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
 
         # First message
         await manager.add_message(user_id=1, content="Hello!", timestamp=now)
@@ -226,7 +224,7 @@ class TestEpisodeManagerBasic:
     @pytest.mark.asyncio
     async def test_anti_flap_rate_limiting(self, manager):
         """Test anti-flap rate limiting protection."""
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
 
         # Create many episodes quickly to trigger rate limit
         for i in range(15):
@@ -245,7 +243,7 @@ class TestEpisodeManagerBasic:
     @pytest.mark.asyncio
     async def test_get_current_episode(self, manager):
         """Test retrieving current episode."""
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
 
         await manager.add_message(user_id=1, content="Hello!", timestamp=now)
 
@@ -258,7 +256,7 @@ class TestEpisodeManagerBasic:
     @pytest.mark.asyncio
     async def test_get_all_episodes(self, manager):
         """Test retrieving all episodes."""
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
 
         # Create some messages in first episode
         for i in range(3):
@@ -274,7 +272,7 @@ class TestEpisodeManagerBasic:
     @pytest.mark.asyncio
     async def test_clear_user_episodes(self, manager):
         """Test clearing user episodes."""
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
 
         await manager.add_message(user_id=1, content="Hello!", timestamp=now)
         manager.clear_user_episodes(1)
@@ -332,7 +330,7 @@ class TestTopicShiftDetection:
     @pytest.mark.asyncio
     async def test_topic_shift_triggers_new_episode(self, manager_with_mock):
         """Test that topic shift triggers new episode."""
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
 
         # Build up episode with pet-related messages
         await manager_with_mock.add_message(user_id=1, content="I love my cat", timestamp=now)
@@ -356,7 +354,7 @@ class TestTopicShiftDetection:
     @pytest.mark.asyncio
     async def test_similar_topic_no_switch(self, manager_with_mock):
         """Test that similar topic continues same episode."""
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
 
         # Build up episode with pet-related messages
         await manager_with_mock.add_message(user_id=1, content="I love my cat", timestamp=now)
@@ -379,7 +377,7 @@ class TestTopicShiftDetection:
     @pytest.mark.asyncio
     async def test_not_enough_messages_no_topic_switch(self, manager_with_mock):
         """Test that topic shift doesn't trigger before min_messages."""
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
 
         # Only 2 messages
         await manager_with_mock.add_message(user_id=1, content="I love my cat", timestamp=now)
@@ -410,7 +408,7 @@ class TestSyntheticDialogues:
     @pytest.mark.asyncio
     async def test_casual_conversation_flow(self, manager):
         """Test a casual conversation without major topic shifts."""
-        base_time = datetime.now()
+        base_time = datetime.now(tz=UTC)
 
         dialogue = [
             ("Hello! How are you?", 10),
@@ -422,7 +420,7 @@ class TestSyntheticDialogues:
         ]
 
         switch_count = 0
-        for i, (content, delay_sec) in enumerate(dialogue):
+        for _i, (content, delay_sec) in enumerate(dialogue):
             ts = base_time + timedelta(seconds=delay_sec)
             msg, decision = await manager.add_message(user_id=1, content=content, timestamp=ts)
             if decision.should_switch:
@@ -434,7 +432,7 @@ class TestSyntheticDialogues:
     @pytest.mark.asyncio
     async def test_topic_change_conversation(self, manager):
         """Test conversation with clear topic changes."""
-        base_time = datetime.now()
+        base_time = datetime.now(tz=UTC)
 
         # Topics: greetings -> work -> hobbies -> weather
         dialogue = [
@@ -467,7 +465,7 @@ class TestSyntheticDialogues:
     @pytest.mark.asyncio
     async def test_interrupted_conversation(self, manager):
         """Test conversation with long interruptions."""
-        base_time = datetime.now()
+        base_time = datetime.now(tz=UTC)
 
         # Morning conversation
         await manager.add_message(user_id=1, content="Good morning!", timestamp=base_time)
@@ -488,7 +486,7 @@ class TestSyntheticDialogues:
     @pytest.mark.asyncio
     async def test_rapid_fire_messages(self, manager):
         """Test rapid-fire messages in short succession."""
-        base_time = datetime.now()
+        base_time = datetime.now(tz=UTC)
 
         # Many messages in quick succession
         for i in range(20):
@@ -504,7 +502,7 @@ class TestSyntheticDialogues:
     @pytest.mark.asyncio
     async def test_multi_user_isolation(self, manager):
         """Test that episodes are isolated between users."""
-        base_time = datetime.now()
+        base_time = datetime.now(tz=UTC)
 
         # User 1 messages
         await manager.add_message(user_id=1, content="Hello from user 1", timestamp=base_time)
@@ -547,8 +545,8 @@ class TestEpisodeSummary:
         episode = Episode(
             episode_id="test_1",
             user_id=1,
-            start_time=datetime.now(),
-            end_time=datetime.now(),
+            start_time=datetime.now(tz=UTC),
+            end_time=datetime.now(tz=UTC),
             messages=[],
         )
 
@@ -558,7 +556,7 @@ class TestEpisodeSummary:
     @pytest.mark.asyncio
     async def test_episode_with_messages_summary(self, manager):
         """Test summary of episode with messages."""
-        now = datetime.now()
+        now = datetime.now(tz=UTC)
 
         episode = Episode(
             episode_id="test_1",
@@ -612,7 +610,7 @@ class TestEdgeCases:
         long_content = "Word " * 10000
 
         msg, decision = await manager.add_message(
-            user_id=1, content=long_content, timestamp=datetime.now()
+            user_id=1, content=long_content, timestamp=datetime.now(tz=UTC)
         )
 
         assert msg.content == long_content
@@ -624,7 +622,7 @@ class TestEdgeCases:
         special_content = "Hello! 🎉 How are you? @#$%^&*() café 日本語"
 
         msg, decision = await manager.add_message(
-            user_id=1, content=special_content, timestamp=datetime.now()
+            user_id=1, content=special_content, timestamp=datetime.now(tz=UTC)
         )
 
         assert msg.content == special_content
@@ -632,14 +630,16 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_empty_message(self, manager):
         """Test handling of empty message."""
-        msg, decision = await manager.add_message(user_id=1, content="", timestamp=datetime.now())
+        msg, decision = await manager.add_message(
+            user_id=1, content="", timestamp=datetime.now(tz=UTC)
+        )
 
         assert msg.content == ""
 
     @pytest.mark.asyncio
     async def test_multiple_switches_with_clearing(self, manager):
         """Test multiple switches with clearing in between."""
-        base_time = datetime.now()
+        base_time = datetime.now(tz=UTC)
 
         # Create some episodes
         for i in range(5):
@@ -661,7 +661,7 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_simultaneous_topic_and_time_trigger(self, manager):
         """Test when both topic shift and time gap occur."""
-        base_time = datetime.now()
+        base_time = datetime.now(tz=UTC)
 
         # First establish a topic
         await manager.add_message(
@@ -690,7 +690,7 @@ class TestEdgeCases:
         # Each pair of messages separated by a large time gap creates an archived episode.
         # We drive more than 50 archives to confirm the cap.
         episodes_to_create = _MAX_ARCHIVED_EPISODES_PER_USER + 10
-        base_time = datetime.now()
+        base_time = datetime.now(tz=UTC)
 
         for i in range(episodes_to_create):
             # Two messages per episode: one to open, one far enough in the future to close the
@@ -712,7 +712,7 @@ class TestEdgeCases:
     async def test_switch_history_capped_at_20(self, manager):
         """Switch history per user is capped at 20 entries."""
         # Force 30 episode starts by using large time gaps each time.
-        base_time = datetime.now()
+        base_time = datetime.now(tz=UTC)
 
         for i in range(30):
             ts = base_time + timedelta(hours=i * 2)

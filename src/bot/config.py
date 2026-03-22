@@ -14,14 +14,15 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.7
     llm_max_tokens: int = 1024
 
-    cognee_vector_db_provider: str = "lancedb"
-    cognee_graph_db_provider: str = "kuzu"
-
     redis_url: str | None = None
+
+    # mem0 memory
+    mem0_supabase_connection_string: str | None = None
+    embedder_model: str = "text-embedding-3-small"
 
     image_base_url: str | None = None
     image_api_key: str | None = None
-    image_model: str = "gpt-image-1"
+    image_model: str = "bytedance/seedream-4.5"
 
     # Langfuse observability
     langfuse_public_key: str | None = None

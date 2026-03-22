@@ -6,14 +6,18 @@ This module provides automatic episode switching based on:
 - Anti-flap mechanism: Prevent rapid episode switching
 """
 
-from __future__ import annotations
-
 import math
+import re
+from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
+import numpy as np
+from langchain_openai import OpenAIEmbeddings
 from loguru import logger
+
+from bot.config import settings
 
 
 class EmbeddingProvider(Protocol):
@@ -36,8 +40,6 @@ class SimpleEmbeddingProvider:
 
     def _tokenize(self, text: str) -> list[str]:
         """Simple tokenization (lowercase, split on whitespace/punctuation)."""
-        import re
-
         return re.findall(r"\b\w+\b", text.lower())
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
@@ -91,10 +93,6 @@ class OpenAIEmbeddingProvider:
         api_key: str | None = None,
         model: str = "text-embedding-3-small",
     ) -> None:
-        from langchain_openai import OpenAIEmbeddings
-
-        from bot.config import settings
-
         self._embeddings = OpenAIEmbeddings(
             model=model,
             api_key=api_key or settings.llm_api_key,  # type: ignore[arg-type]
@@ -203,22 +201,20 @@ class EpisodeManager:
     def _generate_episode_id(self) -> str:
         """Generate a unique episode ID."""
         self._episode_counter += 1
-        return f"ep_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{self._episode_counter}"
+        return f"ep_{datetime.now(tz=UTC).strftime('%Y%m%d_%H%M%S')}_{self._episode_counter}"
 
     def _get_recent_switch_count(self, user_id: int, window_hours: float = 1.0) -> int:
         """Count recent episode switches for anti-flap."""
         if user_id not in self._switch_history:
             return 0
 
-        cutoff = datetime.now() - timedelta(hours=window_hours)
+        cutoff = datetime.now(tz=UTC) - timedelta(hours=window_hours)
         recent = [t for t in self._switch_history[user_id] if t > cutoff]
         self._switch_history[user_id] = recent  # Clean up old entries
         return len(recent)
 
     def _cosine_similarity(self, a: list[float], b: list[float]) -> float:
         """Compute cosine similarity between two vectors."""
-        import numpy as np
-
         vec_a = np.array(a)
         vec_b = np.array(b)
         norm_a = np.linalg.norm(vec_a)
@@ -309,7 +305,7 @@ class EpisodeManager:
         Returns:
             SwitchDecision with should_switch and reasoning
         """
-        current_time = timestamp or datetime.now()
+        current_time = timestamp or datetime.now(tz=UTC)
 
         # Anti-flap: Check rate limiting
         recent_switches = self._get_recent_switch_count(user_id)
@@ -337,7 +333,10 @@ class EpisodeManager:
         if time_since_start < self.config.min_episode_duration:
             return SwitchDecision(
                 should_switch=False,
-                reason=f"Episode too young ({time_since_start:.0f}s < {self.config.min_episode_duration}s)",
+                reason=(
+                    f"Episode too young ({time_since_start:.0f}s"
+                    f" < {self.config.min_episode_duration}s)"
+                ),
                 confidence=1.0,
                 trigger_type="anti_flap_min_duration",
             )
@@ -367,14 +366,21 @@ class EpisodeManager:
         if time_trigger and topic_trigger:
             return SwitchDecision(
                 should_switch=True,
-                reason=f"Time gap ({(current_time - last_message.timestamp).total_seconds() / 60:.0f}min) and topic shift detected",
+                reason=(
+                    f"Time gap"
+                    f" ({(current_time - last_message.timestamp).total_seconds() / 60:.0f}min)"
+                    " and topic shift detected"
+                ),
                 confidence=combined_score,
                 trigger_type="combined",
             )
         elif time_trigger and time_confidence > 0.7:
             return SwitchDecision(
                 should_switch=True,
-                reason=f"Significant time gap: {(current_time - last_message.timestamp).total_seconds() / 60:.0f} minutes",
+                reason=(
+                    "Significant time gap:"
+                    f" {(current_time - last_message.timestamp).total_seconds() / 60:.0f} minutes"
+                ),
                 confidence=time_confidence,
                 trigger_type="time_gap",
             )
@@ -411,7 +417,7 @@ class EpisodeManager:
         Returns:
             Tuple of (Message, SwitchDecision)
         """
-        current_time = timestamp or datetime.now()
+        current_time = timestamp or datetime.now(tz=UTC)
 
         # Evaluate switch
         decision = await self.evaluate_switch(user_id, content, current_time)
@@ -485,6 +491,13 @@ class EpisodeManager:
         )
 
         return episode
+
+    def set_current_episode(self, user_id: int, episode: Episode | None) -> None:
+        """Set (or clear) the current episode for a user."""
+        if episode is None:
+            self._current_episode.pop(user_id, None)
+        else:
+            self._current_episode[user_id] = episode
 
     def get_current_episode(self, user_id: int) -> Episode | None:
         """Get the current episode for a user."""
@@ -652,8 +665,6 @@ class EpisodeManager:
                 "\u0442\u0430\u043a\u043e\u0439",
             }
             words = [w for w in all_text.split() if len(w) > 3 and w not in stop_words]
-            from collections import Counter
-
             topics = [word for word, _ in Counter(words).most_common(5)]
 
         duration_mins = episode.duration_seconds / 60

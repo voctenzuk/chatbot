@@ -8,15 +8,19 @@ The service extracts facts_candidates for memory integration as specified in
 ARCHITECTURE/MEMORY_DESIGN.md.
 """
 
-from __future__ import annotations
-
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, Protocol, Self
 
+from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableConfig
+from langchain_openai import ChatOpenAI
 from loguru import logger
+from pydantic import SecretStr
+
+from bot.config import settings
 
 
 class LLMProvider(Protocol):
@@ -41,13 +45,10 @@ class SimpleLLMProvider:
         model: str = "gpt-4o-mini",
         base_url: str | None = None,
     ) -> None:
-        from langchain_openai import ChatOpenAI
-
-        from bot.config import settings
-
+        raw_key = api_key or settings.llm_api_key
         self._model = ChatOpenAI(
             model=model,
-            api_key=api_key or settings.llm_api_key,
+            api_key=SecretStr(raw_key) if raw_key else None,
             base_url=base_url or settings.llm_base_url,
         )
 
@@ -55,10 +56,9 @@ class SimpleLLMProvider:
         self, prompt: str, temperature: float = 0.7, config: dict[str, Any] | None = None
     ) -> str:
         """Generate text using LangChain ChatOpenAI."""
-        from langchain_core.messages import HumanMessage
-
         model = self._model.bind(temperature=temperature)
-        result = await model.ainvoke([HumanMessage(content=prompt)], config=config or {})
+        effective_config = RunnableConfig(**config) if config else None
+        result = await model.ainvoke([HumanMessage(content=prompt)], config=effective_config)
         return str(result.content)
 
 
@@ -91,7 +91,7 @@ class FactCandidate:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> FactCandidate:
+    def from_dict(cls, data: dict[str, Any]) -> Self:
         """Create from dictionary."""
         return cls(
             text=data.get("text", ""),
@@ -115,7 +115,7 @@ class ArtifactReference:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> ArtifactReference:
+    def from_dict(cls, data: dict[str, Any]) -> Self:
         """Create from dictionary."""
         return cls(
             artifact_id=data.get("artifact_id", ""),
@@ -151,7 +151,7 @@ class SummaryJSON:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> SummaryJSON:
+    def from_dict(cls, data: dict[str, Any]) -> Self:
         """Create from dictionary."""
         facts = [
             FactCandidate.from_dict(f) if isinstance(f, dict) else FactCandidate(text=str(f))
@@ -555,15 +555,14 @@ class Summarizer:
 
     def _validate_summary_json(self, summary: SummaryJSON) -> SummaryJSON:
         """Validate and sanitize parsed summary to prevent memory poisoning."""
-        validated_facts = []
-        for fact in summary.facts_candidates[: self.config.max_facts_per_summary]:
-            validated_facts.append(
-                FactCandidate(
-                    text=fact.text[:500],
-                    confidence=max(0.0, min(1.0, fact.confidence)),
-                    category=fact.category[:50] if fact.category else "general",
-                )
+        validated_facts = [
+            FactCandidate(
+                text=fact.text[:500],
+                confidence=max(0.0, min(1.0, fact.confidence)),
+                category=fact.category[:50] if fact.category else "general",
             )
+            for fact in summary.facts_candidates[: self.config.max_facts_per_summary]
+        ]
         summary.facts_candidates = validated_facts
         summary.topic = summary.topic[:200] if summary.topic else ""
         return summary
@@ -693,11 +692,11 @@ def get_summarizer(
     global _summarizer
 
     # Determine if we need to create a new instance
-    if _summarizer is None:
-        _summarizer = Summarizer(config, llm_provider)
-    elif config is not None:
-        _summarizer = Summarizer(config, llm_provider)
-    elif llm_provider is not None and llm_provider is not _summarizer.llm_provider:
+    if (
+        _summarizer is None
+        or config is not None
+        or (llm_provider is not None and llm_provider is not _summarizer.llm_provider)
+    ):
         _summarizer = Summarizer(config, llm_provider)
 
     # After the above blocks, _summarizer is guaranteed to be set

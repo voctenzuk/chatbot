@@ -4,9 +4,8 @@ This module provides an abstract interface for artifact storage,
 with implementations for local filesystem and future S3/Supabase support.
 """
 
-from __future__ import annotations
-
 import hashlib
+import os
 import shutil
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -226,7 +225,7 @@ class LocalStorageBackend(StorageBackend):
             if not file_path.exists():
                 return None
             return file_path.read_bytes()
-        except (IOError, OSError) as e:
+        except OSError as e:
             logger.error("Failed to retrieve artifact {}: {}", storage_key, e)
             return None
 
@@ -252,7 +251,7 @@ class LocalStorageBackend(StorageBackend):
                 parent = parent.parent
 
             return True
-        except (IOError, OSError) as e:
+        except OSError as e:
             logger.error("Failed to delete artifact {}: {}", storage_key, e)
             return False
 
@@ -268,7 +267,7 @@ class LocalStorageBackend(StorageBackend):
         try:
             file_path = self._get_file_path(storage_key)
             return file_path.exists()
-        except (IOError, OSError, ValueError):
+        except (OSError, ValueError):
             return False
 
     def get_public_url(self, storage_key: str) -> str | None:
@@ -325,22 +324,22 @@ class S3StorageBackend(StorageBackend):
     ) -> StorageReference:
         """Store artifact in S3 (not implemented)."""
         await self._ensure_initialized()
-        raise NotImplementedError()
+        raise NotImplementedError
 
     async def retrieve(self, storage_key: str) -> bytes | None:
         """Retrieve artifact from S3 (not implemented)."""
         await self._ensure_initialized()
-        raise NotImplementedError()
+        raise NotImplementedError
 
     async def delete(self, storage_key: str) -> bool:
         """Delete artifact from S3 (not implemented)."""
         await self._ensure_initialized()
-        raise NotImplementedError()
+        raise NotImplementedError
 
     async def exists(self, storage_key: str) -> bool:
         """Check if artifact exists in S3 (not implemented)."""
         await self._ensure_initialized()
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def get_public_url(self, storage_key: str) -> str | None:
         """Get public URL for S3 object (not implemented)."""
@@ -362,8 +361,6 @@ def get_storage_backend() -> StorageBackend:
     """
     global _storage_backend
     if _storage_backend is None:
-        import os
-
         provider = os.getenv("ARTIFACT_STORAGE_PROVIDER", "local").lower()
 
         if provider == "s3":

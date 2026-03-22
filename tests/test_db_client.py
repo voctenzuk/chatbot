@@ -4,14 +4,20 @@ These tests validate the DB client glue code against a lightweight mock
 Supabase client (rpc/table builders).
 """
 
-from __future__ import annotations
-
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
 
-from bot.services.db_client import DatabaseClient, Episode, EpisodeMessage, EpisodeSummary, Thread
+from bot.infra.db_client import (
+    DatabaseClient,
+    Episode,
+    EpisodeMessage,
+    EpisodeSummary,
+    ProvisionResult,
+    Thread,
+    UserUsage,
+)
 
 
 @pytest.fixture
@@ -40,8 +46,8 @@ def mock_supabase_client() -> MagicMock:
                 "id": tid,
                 "telegram_user_id": user_id,
                 "active_episode_id": None,
-                "created_at": datetime.now().isoformat(),
-                "updated_at": datetime.now().isoformat(),
+                "created_at": datetime.now(tz=UTC).isoformat(),
+                "updated_at": datetime.now(tz=UTC).isoformat(),
             }
             result.execute = MagicMock(return_value=MagicMock(data=tid))
             return result
@@ -55,12 +61,12 @@ def mock_supabase_client() -> MagicMock:
                 "id": eid,
                 "thread_id": thread_id,
                 "status": "active",
-                "started_at": datetime.now().isoformat(),
+                "started_at": datetime.now(tz=UTC).isoformat(),
                 "ended_at": None,
                 "topic_label": topic_label,
                 "last_user_message_at": None,
-                "created_at": datetime.now().isoformat(),
-                "updated_at": datetime.now().isoformat(),
+                "created_at": datetime.now(tz=UTC).isoformat(),
+                "updated_at": datetime.now(tz=UTC).isoformat(),
             }
             threads[thread_id]["active_episode_id"] = eid
             result.execute = MagicMock(return_value=MagicMock(data=eid))
@@ -84,8 +90,8 @@ def mock_supabase_client() -> MagicMock:
                     "id": thread_id,
                     "telegram_user_id": user_id,
                     "active_episode_id": None,
-                    "created_at": datetime.now().isoformat(),
-                    "updated_at": datetime.now().isoformat(),
+                    "created_at": datetime.now(tz=UTC).isoformat(),
+                    "updated_at": datetime.now(tz=UTC).isoformat(),
                 }
 
             episode_id = threads[thread_id].get("active_episode_id")
@@ -96,12 +102,12 @@ def mock_supabase_client() -> MagicMock:
                     "id": episode_id,
                     "thread_id": thread_id,
                     "status": "active",
-                    "started_at": datetime.now().isoformat(),
+                    "started_at": datetime.now(tz=UTC).isoformat(),
                     "ended_at": None,
                     "topic_label": None,
                     "last_user_message_at": None,
-                    "created_at": datetime.now().isoformat(),
-                    "updated_at": datetime.now().isoformat(),
+                    "created_at": datetime.now(tz=UTC).isoformat(),
+                    "updated_at": datetime.now(tz=UTC).isoformat(),
                 }
                 threads[thread_id]["active_episode_id"] = episode_id
 
@@ -115,10 +121,10 @@ def mock_supabase_client() -> MagicMock:
                 "tokens_in": params.get("p_tokens_in"),
                 "tokens_out": params.get("p_tokens_out"),
                 "model": params.get("p_model"),
-                "created_at": datetime.now().isoformat(),
+                "created_at": datetime.now(tz=UTC).isoformat(),
             }
             if role == "user":
-                episodes[episode_id]["last_user_message_at"] = datetime.now().isoformat()
+                episodes[episode_id]["last_user_message_at"] = datetime.now(tz=UTC).isoformat()
 
             result.execute = MagicMock(return_value=MagicMock(data=mid))
             return result
@@ -161,7 +167,7 @@ def mock_supabase_client() -> MagicMock:
                 "kind": kind,
                 "summary_text": params["p_summary_text"],
                 "summary_json": params.get("p_summary_json"),
-                "created_at": datetime.now().isoformat(),
+                "created_at": datetime.now(tz=UTC).isoformat(),
             }
             result.execute = MagicMock(return_value=MagicMock(data=sid))
             return result
@@ -311,7 +317,7 @@ async def test_normalize_message_row_unit():
         "episode_id": "ep_xyz789",
         "role": "user",
         "content_text": "Hello",
-        "created_at": datetime.now().isoformat(),
+        "created_at": datetime.now(tz=UTC).isoformat(),
     }
 
     # Normalize the row
@@ -331,3 +337,118 @@ async def test_normalize_message_row_unit():
     msg = EpisodeMessage.from_row(normalized)
     assert msg.id == "msg_abc123"
     assert msg.episode_id == "ep_xyz789"
+
+
+@pytest.mark.asyncio
+async def test_provision_user_returns_provision_result_new():
+    """provision_user returns ProvisionResult with is_new=True for new user."""
+    mock_client = MagicMock()
+    rpc_result = MagicMock()
+    rpc_result.execute = MagicMock(return_value=MagicMock(data=[{"user_id": 123, "is_new": True}]))
+    mock_client.rpc = MagicMock(return_value=rpc_result)
+
+    db = DatabaseClient(client=mock_client)
+    result = await db.provision_user(123, username="test_user", first_name="Test")
+
+    assert result is not None
+    assert isinstance(result, ProvisionResult)
+    assert result.is_new is True
+    assert result.user_id == 123
+
+
+@pytest.mark.asyncio
+async def test_try_consume_photo_returns_bool():
+    """try_consume_photo returns bool from RPC response."""
+    mock_client = MagicMock()
+    rpc_result = MagicMock()
+    rpc_result.execute = MagicMock(return_value=MagicMock(data=True))
+    mock_client.rpc = MagicMock(return_value=rpc_result)
+
+    db = DatabaseClient(client=mock_client)
+    result = await db.try_consume_photo(123)
+
+    assert result is True
+    mock_client.rpc.assert_called_once_with(
+        "try_consume_photo",
+        {"p_user_id": 123},
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_user_usage_today_returns_user_usage():
+    """get_user_usage_today returns UserUsage from RPC response."""
+    mock_client = MagicMock()
+    rpc_result = MagicMock()
+    rpc_result.execute = MagicMock(
+        return_value=MagicMock(
+            data=[
+                {
+                    "messages_sent": 15,
+                    "photo_count": 3,
+                    "daily_limit": 50,
+                    "photo_limit": 10,
+                    "plan_slug": "plus",
+                    "total_cost": 2.5,
+                    "days_together": 14,
+                }
+            ]
+        )
+    )
+    mock_client.rpc = MagicMock(return_value=rpc_result)
+
+    db = DatabaseClient(client=mock_client)
+    usage = await db.get_user_usage_today(123)
+
+    assert usage is not None
+    assert isinstance(usage, UserUsage)
+    assert usage.messages_sent == 15
+    assert usage.photo_count == 3
+    assert usage.daily_limit == 50
+    assert usage.photo_limit == 10
+    assert usage.plan_slug == "plus"
+    assert usage.total_cost == 2.5
+    assert usage.days_together == 14
+
+
+@pytest.mark.asyncio
+async def test_record_payment_calls_rpc_with_correct_params():
+    """record_payment calls RPC with correct function name and param dict."""
+    mock_client = MagicMock()
+    rpc_result = MagicMock()
+    rpc_result.execute = MagicMock(return_value=MagicMock(data=None))
+    mock_client.rpc = MagicMock(return_value=rpc_result)
+
+    db = DatabaseClient(client=mock_client)
+    await db.record_payment(
+        telegram_user_id=42,
+        amount_cents=385,
+        provider_payment_id="charge_abc",
+    )
+
+    mock_client.rpc.assert_called_once_with(
+        "record_payment",
+        {
+            "p_user_id": 42,
+            "p_amount_cents": 385,
+            "p_provider_payment_id": "charge_abc",
+            "p_status": "succeeded",
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_record_payment_error_is_swallowed():
+    """record_payment swallows RPC errors and logs a warning."""
+    mock_client = MagicMock()
+    rpc_result = MagicMock()
+    rpc_result.execute = MagicMock(side_effect=RuntimeError("db write failed"))
+    mock_client.rpc = MagicMock(return_value=rpc_result)
+
+    db = DatabaseClient(client=mock_client)
+
+    # Should NOT raise
+    await db.record_payment(
+        telegram_user_id=42,
+        amount_cents=385,
+        provider_payment_id="charge_fail",
+    )

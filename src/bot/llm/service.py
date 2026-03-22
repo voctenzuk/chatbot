@@ -1,7 +1,5 @@
 """LLM service for generating chat responses via LangChain."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -13,11 +11,11 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+from langchain_openai import ChatOpenAI
 from loguru import logger
+from pydantic import SecretStr
 
 from bot.config import settings
-
-from langchain_openai import ChatOpenAI
 
 
 @dataclass(frozen=True)
@@ -55,7 +53,7 @@ class LLMService:
         self._model = ChatOpenAI(
             model=settings.llm_model,
             base_url=settings.llm_base_url,
-            api_key=settings.llm_api_key,
+            api_key=SecretStr(settings.llm_api_key) if settings.llm_api_key else None,
             temperature=settings.llm_temperature,
             max_completion_tokens=settings.llm_max_tokens,
         )
@@ -69,7 +67,6 @@ class LLMService:
         self,
         messages: list[dict[str, str]],
         tools: list[dict[str, Any]] | None = None,
-        config: dict[str, Any] | None = None,
     ) -> LLMResponse:
         """Send messages to the LLM and return a structured response.
 
@@ -77,8 +74,6 @@ class LLMService:
             messages: List of ``{"role": ..., "content": ...}`` dicts.
             tools: Optional list of tool schemas (OpenAI function format).
                    When provided, the model may return tool_calls.
-            config: Optional LangChain ``RunnableConfig`` dict (e.g. Langfuse callbacks).
-                    Passed directly to ``ainvoke``; ignored when ``None`` or empty.
 
         Returns:
             ``LLMResponse`` with content, model name, token counts and tool_calls.
@@ -90,26 +85,25 @@ class LLMService:
 
         if tools:
             # Always rebind so callers can pass different tool sets across calls
-            active_model = self._model.bind_tools(tools)  # type: ignore[union-attr]
+            active_model = self._model.bind_tools(tools)
         else:
             active_model = self._model
 
-        result = await active_model.ainvoke(lc_messages, config=config or {})  # type: ignore[union-attr]
+        result = await active_model.ainvoke(lc_messages)
 
         usage: dict[str, Any] = getattr(result, "usage_metadata", {}) or {}
         meta: dict[str, Any] = getattr(result, "response_metadata", {}) or {}
 
         # Extract tool calls if present
-        parsed_tool_calls: list[ToolCall] = []
         raw_tool_calls = getattr(result, "tool_calls", None) or []
-        for tc in raw_tool_calls:
-            parsed_tool_calls.append(
-                ToolCall(
-                    name=tc.get("name", ""),
-                    args=tc.get("args", {}),
-                    id=tc.get("id", ""),
-                )
+        parsed_tool_calls: list[ToolCall] = [
+            ToolCall(
+                name=tc.get("name", ""),
+                args=tc.get("args", {}),
+                id=tc.get("id", ""),
             )
+            for tc in raw_tool_calls
+        ]
 
         return LLMResponse(
             content=str(result.content),
@@ -132,7 +126,7 @@ class LLMService:
             if role == "system":
                 result.append(SystemMessage(content=content))
             elif role == "assistant":
-                tool_calls = msg.get("tool_calls", [])  # type: ignore[arg-type]
+                tool_calls = msg.get("tool_calls", [])
                 if tool_calls:
                     result.append(AIMessage(content=content, tool_calls=tool_calls))
                 else:

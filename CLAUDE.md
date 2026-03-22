@@ -1,52 +1,44 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-## Project
-
-Telegram AI companion chatbot built with aiogram 3 (async, long-polling), LangChain for LLM orchestration, and Cognee for knowledge-graph memory. Bot personality is Russian-language. Package manager is **uv**.
+Telegram AI companion chatbot: aiogram 3 (async, long-polling), LangChain for LLM orchestration, mem0 for long-term memory. Russian-language bot personality. Package manager: **uv**.
 
 ## Commands
 
 ```bash
 uv run bot                                    # run the bot
 uv sync                                       # install/sync dependencies
-uvx ruff format .                             # format code
-uvx ruff check .                              # lint
-uv run pyright                                # type check
+uvx ruff check --fix . && uvx ruff format .   # lint + format
+uvx pyright                                   # type check
 uv run pytest                                 # run all tests
 uv run pytest tests/test_foo.py::test_bar -v  # run a single test
 ```
 
-CI gate (all must pass before merge): `ruff format --check .`, `ruff check .`, `pyright`, `pytest`
+CI gate (all must pass): `uvx ruff format --check .` → `uvx ruff check .` → `uvx pyright` → `uv run pytest`
 
 ## Architecture
 
 **Entry point:** `src/bot/__main__.py` → `app.run()` → `Dispatcher.start_polling()`
 
-**Configuration:** `src/bot/config.py` — single `Settings(BaseSettings)` instance, reads `.env` file. Imported as `from bot.config import settings`.
+**Configuration:** `src/bot/config.py` — `Settings(BaseSettings)`, reads `.env`. Import as `from bot.config import settings`.
 
-**Request flow** (per user message in `handlers.py`):
-1. `EpisodeManager.process_user_message()` — persists message, auto-switches episodes on 8h gap or topic shift (cosine similarity < 0.7)
-2. `CogneeMemoryService.search()` — vector similarity search over knowledge graph (best-effort, skipped if unavailable)
-3. `ContextBuilder.assemble_for_llm()` — merges short-term history (last N messages) + semantic memories + system prompt into an LLM message list
-4. `LLMService.generate()` — calls LLM via LangChain `ChatOpenAI` wrapper, returns `LLMResponse` with content + token counts
-5. Response persisted to episode, sent back to user
+**Character:** `src/bot/character.py` — `CharacterConfig` frozen dataclass + `DEFAULT_CHARACTER`. Personality (Russian), appearance (English for image models), voice style, greeting, few-shot examples, `SPRITE_EMOTIONS` tuple. Loaded in `wiring.py`, passed to `ChatPipeline` + `ImageService`.
 
-**Service wiring:** module-level singletons via `get_*()` / `set_*()` factory functions (e.g. `get_llm_service()`, `get_episode_manager()`).
+**Request flow** (per message in `handlers.py`):
+1. `EpisodeManager.process_user_message()` — persist + auto-switch episodes (8h gap or topic shift)
+2. `check_rate_limit()` — daily message limit per subscription tier (fail-open)
+3. `Mem0MemoryService.search()` — vector similarity search over extracted facts (best-effort)
+4. `get_system_prompt(character=...)` — build prompt from `CharacterConfig` (personality + voice + examples)
+5. `ContextBuilder.assemble_for_llm()` — merge history + semantic memories + system prompt
+6. `LLMService.generate()` — LLM call via LangChain, returns `LLMResponse`
+7. Tool calls: `send_photo` → `try_consume_photo()` (atomic DB check) → `ImageService.generate()` via OpenRouter `chat.completions.create(modalities=["image"])`; `send_sprite` → `ImageService.get_sprite()` (cached emotion sprites from Supabase Storage)
+8. `increment_usage(cost_cents=...)` — track tokens + cost per message/photo
+9. Response persisted to episode, sent to user
 
-**Graceful degradation:** Cognee memory, Supabase DB, and Redis are all optional — the bot falls back to in-memory-only operation when any is missing. Handlers catch service-level exceptions and reply with Russian fallback text.
+**Commands:** `/start` (onboarding: new user greeting + photo vs returning user welcome), `/upgrade` (Telegram Stars), `/stats` (daily usage dashboard).
 
-**Key services** (all in `src/bot/services/`):
-| Service | Role |
-|---|---|
-| `llm_service.py` | LangChain ChatOpenAI wrapper, token tracking |
-| `cognee_memory_service.py` | Long-term memory via Cognee knowledge graph + vector search |
-| `context_builder.py` | Dual-memory (short-term + semantic) prompt assembly |
-| `episode_manager.py` | Episode lifecycle, DB persistence, delegates to `episode_switcher` |
-| `db_client.py` | Supabase client for threads/episodes/messages |
-| `system_prompt.py` | Bot persona system prompt with user-name personalization |
-| `memory_models.py` | Memory category/type enums + `MemoryUnit` data models |
+**Wiring:** Composition root in `src/bot/wiring.py`. `build_app_context()` → `AppContext` dataclass. `ChatPipeline` receives deps via constructor. Handlers get `pipeline` + `db_client` via `dp.workflow_data`. Startup validation: `LLM_API_KEY` missing → `SystemExit(1)`. Langfuse init skipped when `LANGFUSE_ENABLED=false` or no keys.
+
+**Graceful degradation:** mem0, Supabase, Redis are optional — bot falls back to in-memory operation. Photo generation is fail-closed (no DB = no photos).
 
 ## Critical Rules
 
@@ -55,68 +47,58 @@ All service methods MUST be async. Use `ainvoke()` / `astream()` for LangChain, 
 </important>
 
 <important if="writing handlers or touching handlers.py">
-The catch-all `@router.message()` handler with NO filter MUST be registered LAST. Insert new handlers ABOVE it. Always include try/except with Russian fallback text.
+Catch-all `@router.message()` with NO filter MUST be registered LAST. Insert new handlers ABOVE it. Always try/except with Russian fallback text.
 </important>
 
-<important if="working with Cognee or memory">
-All `cognee.add()` calls MUST include `dataset_name=f"tg_user_{user_id}"` for user isolation. Never call `prune_data()`.
+<important if="working with mem0 or memory">
+All mem0 operations MUST use `user_id=f"tg_user_{user_id}"` for per-user data isolation. Memory writes go through `Mem0MemoryService.write_factual()` which auto-extracts facts via LLM.
 </important>
 
 <important if="writing imports from LangChain">
-Use split packages only: `langchain_core`, `langchain_openai`. Never `from langchain.` or `from langchain.schema`.
+Split packages only: `langchain_core`, `langchain_openai`. Never `from langchain.` or `from langchain.schema`.
 </important>
 
-## Environment
-
-Required env vars (loaded via `.env` by pydantic-settings):
-
-| Variable | Required | Notes |
-|---|---|---|
-| `TELEGRAM_BOT_TOKEN` | Yes | Bot crashes on startup without it |
-| `LLM_BASE_URL` | No | LLM provider endpoint (defaults to OpenAI) |
-| `LLM_API_KEY` | No | API key for LLM provider |
-| `REDIS_URL` | No | Redis for rate-limiting; falls back gracefully |
-| `COGNEE_VECTOR_DB_PROVIDER` | No | Default `lancedb` |
-| `COGNEE_GRAPH_DB_PROVIDER` | No | Default `kuzu` |
+<important if="writing type annotations">
+Use `str | None` not `Optional[str]`. Never blanket `# type: ignore` — use `# pyright: ignore[reportSpecificRule]` with comment.
+</important>
 
 ## Code Style
 
-- Python 3.12+ features encouraged
-- Type hints required on public functions
-- 100-char line length (ruff config)
+- Python 3.13+, type hints on public functions, 100-char lines
 - Async-first: all service methods are `async`
-- Commits: present tense, concise ("Add feature" not "Added feature")
+- Logging: `loguru.logger` with `{}` placeholders
+- Commits: present tense, prefixed (`feat:`, `fix:`, `chore:`)
+
+Detailed rules: `.claude/rules/python-style.md` (ruff, pyright, imports, patterns)
+
+## Architecture (target)
+
+Domain packages: `bot.llm`, `bot.memory`, `bot.conversation`, `bot.media`, `bot.infra`, `bot.adapters.telegram`
+Protocols: `LLMPort`, `MemoryPort`, `MessageDeliveryPort` — only where swapping is realistic.
+
+## Monetization
+
+Two tiers (Free/Plus), Pro seeded but YAGNI for MVP. Photo limits: Free=3/day, Plus=10/day.
+Cost tracking: `COST_PER_1M_INPUT=0.15`, `COST_PER_1M_OUTPUT=0.60` in `chat_pipeline.py`. Image cost via `ImageResult.cost_cents` (fallback `DEFAULT_IMAGE_COST_CENTS=4.0` in `image_service.py`).
+Photo rate limit: atomic `try_consume_photo` RPC (race-safe, plan-tier-aware).
+
+## Deployment
+
+**Docker:** `Dockerfile` (multi-stage, Python 3.13-slim, non-root user) + `docker-compose.yml` (bot service + optional Redis via `with-redis` profile). Bot reads `.env` via `env_file`.
+
+**CD:** `.github/workflows/deploy.yml` — triggers on CI workflow success on `main` (via `workflow_run`). SSHs to VPS, `git pull`, `docker compose up -d --build`. Supabase migrations must be applied manually before deploy.
+
+**Config template:** `.env.example` documents all required/optional vars. `cp .env.example .env` to get started.
 
 ## Branching
 
-- `main` — production. `develop` — integration. Feature branches: `feature/<name>`, bugfix: `fix/<name>`
-- Squash or rebase merge preferred
+`main` — production. Feature: `feature/<name>`, bugfix: `fix/<name>`. Squash merge preferred.
 
-## Target Architecture (Selective Composite)
+## Domain Rules
 
-The project is being refactored from flat `services/` to domain-grouped packages with selective hexagonal ports. See memory for full rationale.
-
-**Target structure:**
-```
-src/bot/
-    ports.py                    # 3 Protocols: LLMPort, MemoryPort, MessageDeliveryPort
-    chat_pipeline.py            # Core chat logic extracted from handlers.py
-    adapters/telegram/          # Thin aiogram handlers + proactive scheduler
-    conversation/               # episode_manager, episode_switcher, context_builder, summarizer, system_prompt
-    memory/                     # cognee_service, models, cleanup
-    llm/                        # service, models
-    media/                      # image_service, artifact_service, storage_backend
-    infra/                      # db_client
-```
-
-**Principles:**
-- Protocol only where swapping is realistic (LLM, Memory, MessageDelivery) — NOT for every service
-- Domain grouping for organization, not architectural purity
-- Backward-compatible shims during migration (old imports keep working)
-- Each refactoring phase = separate branch + PR
-
-## Claude Code Tooling
-
-Commands: `/implement`, `/ship`, `/add-feature`, `/check`, `/review`, `/refactor-phase`
-Agents: `planner`, `memory-specialist`, `llm-pipeline`, `telegram-handler`, `tester`, `reviewer`, `security-reviewer`, `prompt-engineer`, `refactor-mover`
-Skills: `add-migration`, `add-service`, `add-handler`, `prompt-review`, `diagnose`, `gen-test`, `verify-imports`
+Loaded via `.claude/rules/` with path-based globs (only when touching relevant files):
+- `testing.md` — pytest conventions, fixtures, mocking, markers (`tests/**`)
+- `python-style.md` — ruff, pyright, imports, async patterns (`**/*.py`)
+- `aiogram.md` — handler conventions, filters, FSM, middleware (`handlers.py`, `app.py`)
+- `langchain.md` — imports, async invocation, LLMService pattern (`bot.llm/**`)
+- `memory-system.md` — mem0, episodes, context builder (`bot.memory/**`, `bot.conversation/**`)

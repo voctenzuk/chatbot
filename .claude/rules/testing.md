@@ -1,47 +1,50 @@
 ---
 paths:
   - "tests/**/*.py"
+  - "tests/conftest.py"
 ---
 
 # Testing conventions
 
-Project uses `asyncio_mode = "auto"` (pyproject.toml), but we still decorate with `@pytest.mark.asyncio` for explicitness.
-
 ## Structure
-- Tests grouped in classes (`TestFeatureName`) per logical area
-- One test file per module: `tests/test_<module>.py`
-- No shared `conftest.py` -- fixtures live in the test file that needs them
-- Use `from __future__ import annotations` in every test file
+- Flat `tests/test_<module>.py`, one per module. Group with `class TestFeatureName`
+- Shared fixtures in `tests/conftest.py` (mock_db, mock_llm, mock_delivery). File-local only for module-specific needs
+- `asyncio_mode = "auto"` — `@pytest.mark.asyncio` optional but allowed for clarity
 
-## Async mock patterns
+## Fixtures
+- **Factory functions** (`_make_pipeline(**overrides)`) for objects with variations — preferred pattern
+- **`@pytest.fixture(autouse=True)`** for singleton resets. Do NOT use `setup_method/teardown_method`
+- `yield` for teardown, never `addfinalizer`. Scope defaults to `function`
+- Max fixture chain depth: 2 levels
 
-<important>
-Use `AsyncMock` for any method that is `await`-ed. Use `MagicMock` for sync attributes and objects.
-Never use `MagicMock` where `AsyncMock` is needed -- the test will return a coroutine-never-awaited warning and silently pass with wrong assertions.
-</important>
-
-```python
-# Async service methods
-manager = AsyncMock()
-manager.process_user_message = AsyncMock(return_value=mock_result)
-
-# Sync data objects / specs
-mock_episode = MagicMock()
-mock_episode.id = "ep_1"
-```
-
-## Fixture patterns
-- `autouse=True` fixtures for singleton teardown (reset global state between tests)
-- `yield` inside `with patch(...)` for fixtures that must mock + cleanup
-- For complex dependencies (e.g. `DatabaseClient`), create a `MagicMock(spec=RealClass)` then assign async closures to its methods instead of relying on `AsyncMock` auto-spec
+## Mocking
 
 <important>
-Always patch at the import location, not the definition: `patch("bot.handlers.get_episode_manager_service")` not `patch("bot.services.episode_manager.get_episode_manager_service")`.
+- `AsyncMock` for any `await`-ed method. Never `MagicMock` for async — returns coroutine-never-awaited warning and silently passes
+- `spec=RealClass` on mocks to catch attribute typos
+- Patch at the **import location**, not the definition: `patch("bot.handlers.get_service")` not `patch("bot.conversation.episode_manager.get_service")`
 </important>
 
-## Custom mock objects
-Prefer purpose-built mock classes (`MockMessage`, `MockEmbeddingProvider`) over deeply nested `MagicMock` when the real object has complex structure (e.g., aiogram `Message`). Keep them minimal -- only the fields tests actually touch.
+- Mock at boundaries (LLM API, Supabase, Redis, Cognee), NOT internal methods between own classes
+- Assert outcomes, NOT call order. `assert_has_calls(..., any_order=False)` is an anti-pattern
+- If `mock.a.b.c.return_value` — test is over-coupled, refactor
+- Purpose-built mock classes (`MockMessage`) for complex types (aiogram `Message`), not deeply nested MagicMock
 
-## Error / edge-case tests
-- Test both the happy path and error propagation (`pytest.raises`)
-- For handler-level tests, verify graceful degradation: the bot should still call `message.answer()` even when services fail
+## Parametrize
+- Use when 3+ tests have identical structure with different data. `pytest.param(..., id="name")` for readable output
+- Do NOT parametrize if cases need different setup/assertion logic
+
+## Markers
+- `@pytest.mark.slow` — tests >2s, skip with `pytest -m "not slow"`
+- `@pytest.mark.integration` — tests hitting real external services
+
+## Coverage
+- CI gate: 80% line + branch coverage (`pytest --cov=bot --cov-branch`)
+- Exclude: `__main__.py`, `if TYPE_CHECKING:` blocks. Do NOT chase 100%
+
+## Anti-patterns — do NOT
+- Test private methods (`_internal()`) — test through public API
+- Use `asyncio.sleep()` for sync — `await` tasks explicitly or use `asyncio.Event`
+- Write tests longer than 30 lines without extracting helpers
+- Share mutable state between tests
+- Assert broadly (`assert "error" in str(result)`) — assert specific types/messages

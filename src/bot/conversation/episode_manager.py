@@ -6,19 +6,21 @@ This module provides episode management with:
 - Integration with Supabase for thread/episode/message storage
 """
 
-from __future__ import annotations
-
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timedelta
+
 from loguru import logger
 
+from bot.conversation.episode_switcher import Episode as InMemoryEpisode
 from bot.conversation.episode_switcher import (
     EpisodeConfig,
-    EpisodeManager as InMemoryEpisodeManager,
+    Message,
     SwitchDecision,
 )
-
+from bot.conversation.episode_switcher import (
+    EpisodeManager as InMemoryEpisodeManager,
+)
 from bot.infra.db_client import DatabaseClient, Episode, EpisodeMessage
 
 DB_CLIENT_AVAILABLE = True
@@ -49,8 +51,8 @@ class EpisodeManagerConfig:
 class MessageResult:
     """Result of processing a message."""
 
-    message: "EpisodeMessage"
-    episode: "Episode"
+    message: EpisodeMessage
+    episode: Episode
     is_new_episode: bool
     switch_decision: SwitchDecision
 
@@ -65,7 +67,7 @@ class EpisodeManager:
     def __init__(
         self,
         config: EpisodeManagerConfig | None = None,
-        db_client: "DatabaseClient | None" = None,
+        db_client: DatabaseClient | None = None,
         embedding_provider=None,
     ) -> None:
         self.config = config or EpisodeManagerConfig()
@@ -88,12 +90,10 @@ class EpisodeManager:
 
     def _get_recent_switch_count(self, user_id: int, window_hours: float = 1.0) -> int:
         """Count recent episode switches for anti-flap."""
-        from datetime import timedelta
-
         if user_id not in self._switch_history:
             return 0
 
-        cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=window_hours)
+        cutoff = datetime.now(tz=UTC) - timedelta(hours=window_hours)
         recent = [t for t in self._switch_history[user_id] if t > cutoff]
         self._switch_history[user_id] = recent
         return len(recent)
@@ -102,7 +102,7 @@ class EpisodeManager:
         """Record an episode switch for rate limiting."""
         if user_id not in self._switch_history:
             self._switch_history[user_id] = []
-        self._switch_history[user_id].append(datetime.now(tz=timezone.utc))
+        self._switch_history[user_id].append(datetime.now(tz=UTC))
 
     async def _seed_in_memory_state_from_db(self, user_id: int) -> bool:
         """Seed in-memory episode manager from database state.
@@ -126,21 +126,16 @@ class EpisodeManager:
         # Get messages for this episode to seed the in-memory state
         messages = await self.db.get_messages_for_episode(episode.id, limit=50)
 
-        # Import here to avoid circular imports
-        from bot.conversation.episode_switcher import Episode as InMemoryEpisode, Message
-
         # Create in-memory episode
         in_memory_episode = InMemoryEpisode(
             episode_id=episode.id,
             user_id=user_id,
-            start_time=episode.started_at or datetime.now(tz=timezone.utc),
-            end_time=episode.last_user_message_at
-            or episode.started_at
-            or datetime.now(tz=timezone.utc),
+            start_time=episode.started_at or datetime.now(tz=UTC),
+            end_time=episode.last_user_message_at or episode.started_at or datetime.now(tz=UTC),
             messages=[
                 Message(
                     content=m.content_text,
-                    timestamp=m.created_at or datetime.now(tz=timezone.utc),
+                    timestamp=m.created_at or datetime.now(tz=UTC),
                     user_id=user_id,
                     role=m.role,
                 )
@@ -149,7 +144,7 @@ class EpisodeManager:
         )
 
         # Seed the in-memory manager
-        self._in_memory_manager._current_episode[user_id] = in_memory_episode
+        self._in_memory_manager.set_current_episode(user_id, in_memory_episode)
 
         logger.debug(
             "Seeded in-memory state for user {} from DB episode {} ({} messages)",
@@ -163,7 +158,7 @@ class EpisodeManager:
         self,
         user_id: int,
         content: str,
-        episode: "Episode | None" = None,
+        episode: Episode | None = None,
     ) -> SwitchDecision:
         """Evaluate whether to start a new episode."""
 
@@ -178,7 +173,7 @@ class EpisodeManager:
 
         # Check if we need to seed in-memory state from DB
         # This prevents unnecessary episode splits after restart when DB has active episode
-        if self._in_memory_manager._current_episode.get(user_id) is None and self.db:
+        if self._in_memory_manager.get_current_episode(user_id) is None and self.db:
             await self._seed_in_memory_state_from_db(user_id)
 
         # Get last message time from database
@@ -188,7 +183,7 @@ class EpisodeManager:
             if episode:
                 # Check minimum episode duration
                 if hasattr(episode, "started_at") and episode.started_at:
-                    elapsed = (datetime.now(tz=timezone.utc) - episode.started_at).total_seconds()
+                    elapsed = (datetime.now(tz=UTC) - episode.started_at).total_seconds()
                     if elapsed < self.config.min_episode_duration:
                         return SwitchDecision(
                             should_switch=False,
@@ -199,9 +194,7 @@ class EpisodeManager:
 
                 # Check time gap
                 if hasattr(episode, "last_user_message_at") and episode.last_user_message_at:
-                    gap = (
-                        datetime.now(tz=timezone.utc) - episode.last_user_message_at
-                    ).total_seconds()
+                    gap = (datetime.now(tz=UTC) - episode.last_user_message_at).total_seconds()
                     if gap >= self.config.time_gap_threshold:
                         return SwitchDecision(
                             should_switch=True,
@@ -346,7 +339,7 @@ class EpisodeManager:
         self,
         user_id: int,
         final_summary: str | None = None,
-    ) -> "Episode | None":
+    ) -> Episode | None:
         """Close the current episode for a user.
 
         Args:
@@ -367,12 +360,12 @@ class EpisodeManager:
             closed = await self.db.close_episode(episode.id)
 
             # Clear in-memory state so next message starts fresh
-            self._in_memory_manager._current_episode.pop(user_id, None)
+            self._in_memory_manager.set_current_episode(user_id, None)
 
             logger.info("Closed episode {} for user {}", episode.id, user_id)
             return closed
 
-    async def get_current_episode(self, user_id: int) -> "Episode | None":
+    async def get_current_episode(self, user_id: int) -> Episode | None:
         """Get the current episode for a user.
 
         Args:
@@ -385,7 +378,7 @@ class EpisodeManager:
             return None
         return await self.db.get_active_episode_for_user(user_id)
 
-    async def get_episode_history(self, user_id: int) -> "list[Episode]":
+    async def get_episode_history(self, user_id: int) -> list[Episode]:
         """Get episode history for a user.
 
         Args:
@@ -405,7 +398,7 @@ class EpisodeManager:
 
     async def get_messages_for_current_episode(
         self, user_id: int, limit: int = 100
-    ) -> "list[EpisodeMessage]":
+    ) -> list[EpisodeMessage]:
         """Get messages for the current episode.
 
         Args:
@@ -424,7 +417,7 @@ class EpisodeManager:
 
         return await self.db.get_messages_for_episode(episode.id, limit)
 
-    async def get_recent_messages(self, user_id: int, limit: int = 50) -> "list[EpisodeMessage]":
+    async def get_recent_messages(self, user_id: int, limit: int = 50) -> list[EpisodeMessage]:
         """Get recent messages for a user.
 
         Args:
