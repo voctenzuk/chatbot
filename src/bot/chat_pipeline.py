@@ -7,7 +7,10 @@ with zero aiogram dependencies. Receives all services via constructor.
 import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from loguru import logger
 
@@ -20,12 +23,16 @@ from bot.conversation.episode_manager import EpisodeManager, EpisodeMessage
 from bot.conversation.system_prompt import get_system_prompt
 from bot.llm.service import LLMResponse, LLMService, ToolCall
 from bot.media.image_service import SEND_PHOTO_TOOL, SEND_SPRITE_TOOL, ImageResult
+from bot.tools.time_tool import GET_TIME_TOOL, execute_get_time
+from bot.tools.weather_tool import GET_WEATHER_TOOL, execute_get_weather
 
 LLM_FALLBACK = "Прости, у меня сейчас не получается ответить. Попробуй ещё раз чуть позже."
 
 # LLM cost per 1M tokens in cents (kimi-k2p5 pricing)
 COST_PER_1M_INPUT = 0.15
 COST_PER_1M_OUTPUT = 0.60
+
+MAX_TOOL_ROUNDS = 3
 
 _ROLE_MAP = {
     "user": MessageRole.USER,
@@ -71,6 +78,19 @@ class ChatPipeline:
         self.db_client = db_client
         self._character = character
         self._background_tasks: set[asyncio.Task[Any]] = set()
+
+        # Always-available tools
+        self._tool_registry: dict[str, Callable[..., Any]] = {
+            "get_current_time": self._handle_get_time,
+            "get_weather": self._handle_get_weather,
+        }
+        self._tool_schemas: list[dict[str, object]] = [GET_TIME_TOOL, GET_WEATHER_TOOL]
+
+        # Image tools (only when image_service available)
+        if self._image_service is not None:
+            self._tool_registry["send_photo"] = self._handle_send_photo
+            self._tool_registry["send_sprite"] = self._handle_send_sprite
+            self._tool_schemas.extend([SEND_PHOTO_TOOL, SEND_SPRITE_TOOL])
 
     @property
     def character(self) -> Any:
@@ -259,15 +279,21 @@ class ChatPipeline:
                 system_prompt=system_prompt,
             )
 
-            # First LLM call (with image tools if available)
-            tools = None
-            if self._image_service is not None:
-                tools = [SEND_PHOTO_TOOL, SEND_SPRITE_TOOL]
+            # First LLM call (with all registered tools)
+            llm_response = await self._llm.generate(llm_messages, tools=self._tool_schemas)
 
-            llm_response = await self._llm.generate(llm_messages, tools=tools)
+            # Multi-round tool execution loop
+            all_tool_calls: list[ToolCall] = []
+            total_tokens_in = llm_response.tokens_in
+            total_tokens_out = llm_response.tokens_out
+            current_messages = llm_messages
 
-            # Tool execution loop
-            if llm_response.tool_calls and tools:
+            for _round in range(MAX_TOOL_ROUNDS):
+                if not llm_response.tool_calls:
+                    break
+
+                all_tool_calls.extend(llm_response.tool_calls)
+
                 tool_messages: list[dict[str, str]] = []
                 for tc in llm_response.tool_calls:
                     result_text = await self._execute_tool_for_loop(tc, user_id, generated_images)
@@ -279,11 +305,11 @@ class ChatPipeline:
                         }
                     )
 
-                follow_up: list[dict[str, str]] = llm_messages + [
+                current_messages = current_messages + [
                     {
                         "role": "assistant",
                         "content": llm_response.content or "",
-                        "tool_calls": [  # type: ignore[list-item]
+                        "tool_calls": [
                             {"name": tc.name, "args": tc.args, "id": tc.id}
                             for tc in llm_response.tool_calls
                         ],
@@ -291,14 +317,17 @@ class ChatPipeline:
                     *tool_messages,
                 ]
 
-                final_response = await self._llm.generate(follow_up)
+                llm_response = await self._llm.generate(current_messages)
+                total_tokens_in += llm_response.tokens_in
+                total_tokens_out += llm_response.tokens_out
 
+            if all_tool_calls:
                 return LLMResponse(
-                    content=final_response.content,
-                    model=final_response.model,
-                    tokens_in=llm_response.tokens_in + final_response.tokens_in,
-                    tokens_out=llm_response.tokens_out + final_response.tokens_out,
-                    tool_calls=llm_response.tool_calls,
+                    content=llm_response.content,
+                    model=llm_response.model,
+                    tokens_in=total_tokens_in,
+                    tokens_out=total_tokens_out,
+                    tool_calls=all_tool_calls,
                 )
 
             return llm_response
@@ -315,44 +344,76 @@ class ChatPipeline:
         can deliver them without re-generating (avoids double API cost).
         Values are ImageResult (for photos) or raw bytes (for sprites).
         """
-        if tool_call.name == "send_photo":
-            try:
-                if self._image_service is None:
-                    return "Image service unavailable"
+        handler = self._tool_registry.get(tool_call.name)
+        if handler is None:
+            return f"Unknown tool: {tool_call.name}"
+        return await handler(tool_call, user_id, generated_images)
 
-                # Photo rate limit: fail-closed (no DB = no photos)
-                if self.db_client is not None:
-                    allowed = await self.db_client.try_consume_photo(user_id)
-                    if not allowed:
-                        return (
-                            "Лимит фото на сегодня исчерпан. Напиши /upgrade для увеличения лимита."
-                        )
-                else:
-                    return "Image service unavailable"
+    async def _handle_send_photo(
+        self,
+        tool_call: ToolCall,
+        user_id: int,
+        generated_images: dict[str, Any],
+    ) -> str:
+        """Handle send_photo tool call."""
+        try:
+            if self._image_service is None:
+                return "Image service unavailable"
 
-                prompt = tool_call.args.get("prompt", "")
-                image_result = await self._image_service.generate(prompt, user_id)
-                if image_result is not None:
-                    generated_images[tool_call.id] = image_result
-                    return f"Photo generated successfully for prompt: {prompt[:50]}"
-                return "Image generation failed"
-            except Exception as e:
-                return f"Image generation failed: {e}"
+            # Photo rate limit: fail-closed (no DB = no photos)
+            if self.db_client is not None:
+                allowed = await self.db_client.try_consume_photo(user_id)
+                if not allowed:
+                    return "Лимит фото на сегодня исчерпан. Напиши /upgrade для увеличения лимита."
+            else:
+                return "Image service unavailable"
 
-        if tool_call.name == "send_sprite":
-            try:
-                if self._image_service is None:
-                    return "Sprite service unavailable"
-                emotion = tool_call.args.get("emotion", "smile")
-                sprite_bytes = await self._image_service.get_sprite(emotion)
-                if sprite_bytes is not None:
-                    generated_images[tool_call.id] = sprite_bytes  # raw bytes, no cost
-                    return f"Sent emotion sprite: {emotion}"
-                return "Sprite unavailable"
-            except Exception as e:
-                return f"Sprite failed: {e}"
+            prompt = tool_call.args.get("prompt", "")
+            image_result = await self._image_service.generate(prompt, user_id)
+            if image_result is not None:
+                generated_images[tool_call.id] = image_result
+                return f"Photo generated successfully for prompt: {prompt[:50]}"
+            return "Image generation failed"
+        except Exception as e:
+            return f"Image generation failed: {e}"
 
-        return f"Unknown tool: {tool_call.name}"
+    async def _handle_send_sprite(
+        self,
+        tool_call: ToolCall,
+        user_id: int,
+        generated_images: dict[str, Any],
+    ) -> str:
+        """Handle send_sprite tool call."""
+        try:
+            if self._image_service is None:
+                return "Sprite service unavailable"
+            emotion = tool_call.args.get("emotion", "smile")
+            sprite_bytes = await self._image_service.get_sprite(emotion)
+            if sprite_bytes is not None:
+                generated_images[tool_call.id] = sprite_bytes  # raw bytes, no cost
+                return f"Sent emotion sprite: {emotion}"
+            return "Sprite unavailable"
+        except Exception as e:
+            return f"Sprite failed: {e}"
+
+    async def _handle_get_time(
+        self,
+        tool_call: ToolCall,
+        user_id: int,
+        generated_images: dict[str, Any],
+    ) -> str:
+        """Handle get_current_time tool call."""
+        return await execute_get_time()
+
+    async def _handle_get_weather(
+        self,
+        tool_call: ToolCall,
+        user_id: int,
+        generated_images: dict[str, Any],
+    ) -> str:
+        """Handle get_weather tool call."""
+        city = tool_call.args.get("city", "")
+        return await execute_get_weather(city)
 
     async def _write_memory_background(self, memory_content: str, user_id: int) -> None:
         """Write to long-term memory in background. Fire-and-forget."""

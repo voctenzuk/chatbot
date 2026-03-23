@@ -357,8 +357,16 @@ class TestHandlerToolCallIntegration:
             )
         )
 
+        # First call returns tool_calls, second call (follow-up) returns plain text
+        follow_up_resp = LLMResponse(
+            content="Вот держи!",
+            model="test",
+            tokens_in=5,
+            tokens_out=10,
+            tool_calls=[],
+        )
         mock_llm_svc = AsyncMock()
-        mock_llm_svc.generate = AsyncMock(return_value=llm_resp)
+        mock_llm_svc.generate = AsyncMock(side_effect=[llm_resp, follow_up_resp])
 
         mock_context_builder = MagicMock()
         mock_context_builder.assemble_for_llm = MagicMock(
