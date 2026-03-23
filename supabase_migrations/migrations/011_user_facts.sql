@@ -32,13 +32,20 @@ LANGUAGE sql STABLE AS $$
 $$;
 
 -- RPC for message stats with consecutive_days via gaps-and-islands
+-- Join path: messages → episodes → threads (telegram_user_id is on threads)
 CREATE OR REPLACE FUNCTION get_message_stats(p_user_id BIGINT)
 RETURNS TABLE(total_messages BIGINT, days_active BIGINT, consecutive_days BIGINT, days_since_last BIGINT)
 LANGUAGE sql STABLE AS $$
-    WITH user_dates AS (
+    WITH user_messages AS (
+        SELECT m.created_at
+        FROM messages m
+        JOIN episodes e ON m.episode_id = e.id
+        JOIN threads t ON e.thread_id = t.id
+        WHERE t.telegram_user_id = p_user_id AND m.role = 'user'
+    ),
+    user_dates AS (
         SELECT DISTINCT DATE(created_at) AS d
-        FROM messages
-        WHERE telegram_user_id = p_user_id AND role = 'user'
+        FROM user_messages
     ),
     streak AS (
         SELECT d, d + (ROW_NUMBER() OVER (ORDER BY d DESC))::int * INTERVAL '1 day' AS grp
@@ -48,7 +55,7 @@ LANGUAGE sql STABLE AS $$
         SELECT grp FROM streak WHERE d = CURRENT_DATE LIMIT 1
     )
     SELECT
-        (SELECT COUNT(*) FROM messages WHERE telegram_user_id = p_user_id AND role = 'user') AS total_messages,
+        (SELECT COUNT(*) FROM user_messages) AS total_messages,
         (SELECT COUNT(*) FROM user_dates) AS days_active,
         COALESCE((SELECT COUNT(*) FROM streak WHERE grp = (SELECT grp FROM today_group)), 0) AS consecutive_days,
         COALESCE((SELECT CURRENT_DATE - MAX(d) FROM user_dates), 0)::BIGINT AS days_since_last;
