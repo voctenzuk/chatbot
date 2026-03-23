@@ -20,6 +20,13 @@ from langchain_openai import ChatOpenAI
 from loguru import logger
 from pydantic import SecretStr
 
+try:
+    from langchain_openrouter import ChatOpenRouter
+
+    _openrouter_available = True
+except ImportError:
+    _openrouter_available = False
+
 from bot.config import settings
 
 
@@ -55,15 +62,28 @@ class LLMService:
             self._model = model
             return
 
-        self._model = ChatOpenAI(
-            model=settings.llm_model,
-            base_url=settings.llm_base_url,
-            api_key=SecretStr(settings.llm_api_key) if settings.llm_api_key else None,
-            temperature=settings.llm_temperature,
-            max_completion_tokens=settings.llm_max_tokens,
-            max_retries=5,
-        )
-        logger.info("LLMService initialised with model={}", settings.llm_model)
+        api_key = SecretStr(settings.llm_api_key) if settings.llm_api_key else None
+        is_openrouter = settings.llm_base_url and "openrouter" in settings.llm_base_url
+
+        if _openrouter_available and is_openrouter:
+            self._model = ChatOpenRouter(
+                model_name=settings.llm_model,
+                openrouter_api_key=api_key,
+                temperature=settings.llm_temperature,
+                max_completion_tokens=settings.llm_max_tokens,
+                max_retries=5,
+            )
+            logger.info("LLMService initialised with ChatOpenRouter, model={}", settings.llm_model)
+        else:
+            self._model = ChatOpenAI(
+                model=settings.llm_model,
+                base_url=settings.llm_base_url,
+                api_key=api_key,
+                temperature=settings.llm_temperature,
+                max_completion_tokens=settings.llm_max_tokens,
+                max_retries=5,
+            )
+            logger.info("LLMService initialised with ChatOpenAI, model={}", settings.llm_model)
 
     # ------------------------------------------------------------------
     # Public API
