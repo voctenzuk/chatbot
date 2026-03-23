@@ -30,6 +30,9 @@ class AppContext:
     db_client: Any | None = None  # DatabaseClient
     scheduler: Any | None = None  # ProactiveScheduler
     character: Any | None = None  # CharacterConfig
+    fact_extractor: Any | None = None  # FactExtractorService
+    profile_builder: Any | None = None  # UserProfileBuilder
+    relationship_scorer: Any | None = None  # RelationshipScorer
     pipeline: Any | None = None  # ChatPipeline (set after construction)
     _background_tasks: set[asyncio.Task[Any]] = field(default_factory=set, repr=False)
 
@@ -144,6 +147,32 @@ async def build_app_context() -> AppContext:
     episode_manager = EpisodeManager(db_client=db_client)
     logger.info("EpisodeManager created (db={})", "yes" if db_client else "no")
 
+    # --- Relationship scorer (optional — gracefully degrades) ---
+    relationship_scorer = None
+    try:
+        from bot.memory.relationship_scorer import RelationshipScorer
+
+        relationship_scorer = RelationshipScorer()
+        logger.info("RelationshipScorer created")
+    except Exception as exc:
+        logger.info("RelationshipScorer unavailable ({}), skipping", exc)
+
+    # --- Fact extraction pipeline (optional — requires LLM) ---
+    fact_extractor = None
+    profile_builder = None
+    try:
+        from bot.memory.fact_extractor import FactExtractorService
+        from bot.memory.profile_builder import UserProfileBuilder
+
+        fact_extractor = FactExtractorService(llm=llm, mem0_service=memory)
+        profile_builder = UserProfileBuilder(
+            db_client=db_client,
+            relationship_scorer=relationship_scorer,
+        )
+        logger.info("FactExtractorService and UserProfileBuilder created")
+    except Exception as exc:
+        logger.info("Fact extraction pipeline unavailable ({}), skipping", exc)
+
     # --- ChatPipeline ---
     from bot.chat_pipeline import ChatPipeline
 
@@ -156,6 +185,9 @@ async def build_app_context() -> AppContext:
         image_service=image_service,
         db_client=db_client,
         character=DEFAULT_CHARACTER,
+        fact_extractor=fact_extractor,
+        profile_builder=profile_builder,
+        relationship_scorer=relationship_scorer,
     )
     logger.info("ChatPipeline created")
 
@@ -168,14 +200,19 @@ async def build_app_context() -> AppContext:
         image_service=image_service,
         db_client=db_client,
         character=DEFAULT_CHARACTER,
+        fact_extractor=fact_extractor,
+        profile_builder=profile_builder,
+        relationship_scorer=relationship_scorer,
         pipeline=pipeline,
     )
 
     logger.info(
-        "AppContext built: memory={}, db={}, images={}",
+        "AppContext built: memory={}, db={}, images={}, fact_extractor={}, relationship_scorer={}",
         memory is not None,
         db_client is not None,
         image_service is not None,
+        fact_extractor is not None,
+        relationship_scorer is not None,
     )
     return ctx
 

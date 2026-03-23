@@ -367,7 +367,11 @@ class ContextBuilder:
             elif memory.memory_category == MemoryCategory.EMOTIONAL:
                 prefix = "[Emotional] "
 
-            lines.append(f"- {prefix}{memory.content}")
+            line = f"- {prefix}{memory.content}"
+            if memory.related_memories:
+                related_ids = ", ".join(memory.related_memories[:3])
+                line += f" (Related: {related_ids})"
+            lines.append(line)
 
         header = f"Relevant memories about: {query}\n" if query else "Relevant memories:\n"
         content = header + "\n".join(lines)
@@ -530,7 +534,7 @@ class ContextBuilder:
         artifact_surrogates: list[Any] | None = None,
         query: str | None = None,
         system_prompt: str | None = None,
-    ) -> list[dict[str, str]]:
+    ) -> list[dict[str, Any]]:
         """Assemble context as list of messages for LLM chat API.
 
         Args:
@@ -544,7 +548,7 @@ class ContextBuilder:
         Returns:
             List of message dictionaries for LLM API.
         """
-        messages: list[dict[str, str]] = []
+        messages: list[dict[str, Any]] = []
 
         # Add system prompt if provided
         if system_prompt:
@@ -569,7 +573,7 @@ class ContextBuilder:
 
         return self._trim_final_messages(messages)
 
-    def _trim_final_messages(self, messages: list[dict[str, str]]) -> list[dict[str, str]]:
+    def _trim_final_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Apply LangChain trim_messages as a final guardrail against overflow."""
         role_cls = {
             "system": SystemMessage,

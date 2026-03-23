@@ -5,6 +5,7 @@ with zero aiogram dependencies. Receives all services via constructor.
 """
 
 import asyncio
+import hashlib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -14,6 +15,7 @@ if TYPE_CHECKING:
 
 from loguru import logger
 
+from bot.config import settings
 from bot.conversation.context_builder import (
     ContextBuilder,
     ConversationMessage,
@@ -23,14 +25,12 @@ from bot.conversation.episode_manager import EpisodeManager, EpisodeMessage
 from bot.conversation.system_prompt import get_system_prompt
 from bot.llm.service import LLMResponse, LLMService, ToolCall
 from bot.media.image_service import SEND_PHOTO_TOOL, SEND_SPRITE_TOOL, ImageResult
+from bot.memory.fact_extractor import ExtractedFact, FactExtractorService
+from bot.memory.profile_builder import UserProfileBuilder
 from bot.tools.time_tool import GET_TIME_TOOL, execute_get_time
 from bot.tools.weather_tool import GET_WEATHER_TOOL, execute_get_weather
 
 LLM_FALLBACK = "Прости, у меня сейчас не получается ответить. Попробуй ещё раз чуть позже."
-
-# LLM cost per 1M tokens in cents (kimi-k2p5 pricing)
-COST_PER_1M_INPUT = 0.15
-COST_PER_1M_OUTPUT = 0.60
 
 MAX_TOOL_ROUNDS = 3
 
@@ -68,6 +68,9 @@ class ChatPipeline:
         image_service: Any | None = None,
         db_client: Any | None = None,
         character: Any | None = None,
+        fact_extractor: FactExtractorService | None = None,
+        profile_builder: UserProfileBuilder | None = None,
+        relationship_scorer: Any | None = None,
     ) -> None:
         self._llm = llm
         self.episode_manager = episode_manager
@@ -77,7 +80,11 @@ class ChatPipeline:
         self._image_service = image_service
         self.db_client = db_client
         self._character = character
+        self._fact_extractor = fact_extractor
+        self._profile_builder = profile_builder
+        self._relationship_scorer = relationship_scorer
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._msg_counts: dict[int, int] = {}
 
         # Always-available tools
         self._tool_registry: dict[str, Callable[..., Any]] = {
@@ -121,6 +128,7 @@ class ChatPipeline:
         user_id: int,
         content: str,
         user_name: str | None = None,
+        images: list[str] | None = None,
     ) -> ChatResult:
         """Process a user message and return a response.
 
@@ -130,7 +138,8 @@ class ChatPipeline:
         3. Generate LLM response (with memory search + context assembly)
         4. Handle tool calls (image generation)
         5. Persist assistant response + track usage (post-send)
-        6. Write to long-term memory (fire-and-forget)
+        6. Relationship cache invalidation every Nth message
+        7. Write to long-term memory (fire-and-forget)
         """
         # 1. Persist user message
         result = await self.episode_manager.process_user_message(user_id=user_id, content=content)
@@ -165,6 +174,7 @@ class ChatPipeline:
                 content=content,
                 user_name=user_name,
                 generated_images=generated_images,
+                images=images,
             )
             response = llm_response.content
         except Exception as llm_exc:
@@ -203,10 +213,16 @@ class ChatPipeline:
 
         if self.db_client is not None and llm_response is not None:
             try:
-                cost_cents = (
-                    llm_response.tokens_in * COST_PER_1M_INPUT
-                    + llm_response.tokens_out * COST_PER_1M_OUTPUT
-                ) / 1_000_000
+                if images:
+                    cost_cents = (
+                        llm_response.tokens_in * settings.vision_cost_per_1m_input
+                        + llm_response.tokens_out * settings.vision_cost_per_1m_output
+                    ) / 1_000_000
+                else:
+                    cost_cents = (
+                        llm_response.tokens_in * settings.cost_per_1m_input
+                        + llm_response.tokens_out * settings.cost_per_1m_output
+                    ) / 1_000_000
                 cost_cents += image_cost_cents
                 await self.db_client.increment_usage(
                     user_id,
@@ -218,11 +234,34 @@ class ChatPipeline:
             except Exception as exc:
                 logger.warning("Usage tracking failed for user {}: {}", user_id, exc)
 
-        # 6. Write to long-term memory (fire-and-forget)
-        if self._memory is not None and llm_response is not None:
+        if images and llm_response is not None:
+            logger.info(
+                "vision_processed user_id={} tokens_in={} tokens_out={}",
+                user_id,
+                llm_response.tokens_in,
+                llm_response.tokens_out,
+            )
+
+        # 6. Increment message counter + invalidate relationship cache every 10th message
+        if self._relationship_scorer is not None:
+            self._msg_counts[user_id] = self._msg_counts.get(user_id, 0) + 1
+            self._relationship_scorer.invalidate_if_nth_message(user_id, self._msg_counts[user_id])
+
+        # 7. Write to long-term memory + extract facts (fire-and-forget)
+        if llm_response is not None:
             try:
-                memory_content = f"Пользователь: {content}\nПодруга: {response}"
-                self._fire_and_forget(self._write_memory_background(memory_content, user_id))
+                # Photo description persistence: prepend first sentence of LLM description
+                if images and llm_response.content:
+                    first_sentence = llm_response.content.split(".")[0].strip()
+                    content_for_persist = f"[Image: {first_sentence}] {content}"
+                else:
+                    content_for_persist = content
+                memory_content = f"Пользователь: {content_for_persist}\nПодруга: {response}"
+                self._fire_and_forget(
+                    self._write_memory_background(
+                        memory_content, user_id, content_for_persist, response
+                    )
+                )
             except Exception as exc:
                 logger.warning("Memory write failed for user {}: {}", user_id, exc)
 
@@ -242,6 +281,7 @@ class ChatPipeline:
         content: str,
         user_name: str | None,
         generated_images: dict[str, Any] | None = None,
+        images: list[str] | None = None,
     ) -> LLMResponse:
         """Build context and call LLM to produce a reply."""
         if generated_images is None:
@@ -270,8 +310,20 @@ class ChatPipeline:
             recent_episode_msgs = await self.episode_manager.get_recent_messages(user_id, limit=20)
             recent_messages = _episode_messages_to_conversation(recent_episode_msgs)
 
+            # Compute relationship level (best-effort, cache-first)
+            rel_level = None
+            if self._relationship_scorer is not None and self.db_client is not None:
+                try:
+                    rel_level = await self._relationship_scorer.compute(user_id, self.db_client)
+                except Exception:
+                    logger.warning("Relationship scoring failed for user {}", user_id)
+
             # Assemble LLM messages via context builder
-            system_prompt = get_system_prompt(user_name=user_name, character=self._character)
+            system_prompt = get_system_prompt(
+                user_name=user_name,
+                character=self._character,
+                relationship_level=rel_level,
+            )
             llm_messages = self._context_builder.assemble_for_llm(
                 recent_messages=recent_messages,
                 semantic_memories=memories,
@@ -279,8 +331,15 @@ class ChatPipeline:
                 system_prompt=system_prompt,
             )
 
-            # First LLM call (with all registered tools)
-            llm_response = await self._llm.generate(llm_messages, tools=self._tool_schemas)
+            # Attach images to the last user message if present
+            if images:
+                llm_messages = _attach_images_to_last_user_message(llm_messages, images)
+
+            # First LLM call (vision calls skip tools to keep costs down)
+            if images:
+                llm_response = await self._llm.generate(llm_messages)
+            else:
+                llm_response = await self._llm.generate(llm_messages, tools=self._tool_schemas)
 
             # Multi-round tool execution loop
             all_tool_calls: list[ToolCall] = []
@@ -415,14 +474,71 @@ class ChatPipeline:
         city = tool_call.args.get("city", "")
         return await execute_get_weather(city)
 
-    async def _write_memory_background(self, memory_content: str, user_id: int) -> None:
-        """Write to long-term memory in background. Fire-and-forget."""
-        if self._memory is None:
-            return
-        try:
-            await self._memory.write_factual(content=memory_content, user_id=user_id)
-        except Exception as exc:
-            logger.warning("Background memory write failed for user {}: {}", user_id, exc)
+    async def _write_memory_background(
+        self,
+        memory_content: str,
+        user_id: int,
+        user_msg: str = "",
+        bot_response: str = "",
+    ) -> None:
+        """Write to long-term memory and extract facts in background. Fire-and-forget."""
+        if self._memory is not None:
+            try:
+                await self._memory.write_factual(content=memory_content, user_id=user_id)
+            except Exception as exc:
+                logger.warning("Background memory write failed for user {}: {}", user_id, exc)
+
+        if (
+            self._fact_extractor is not None
+            and self._profile_builder is not None
+            and self.db_client is not None
+        ):
+            try:
+                profile = await self._profile_builder.get_profile(user_id)
+                facts = await self._fact_extractor.extract(
+                    user_msg,
+                    bot_response,
+                    profile,
+                    user_id=user_id,
+                )
+                if facts:
+                    for fact in facts:
+                        await self.db_client.upsert_user_fact(user_id, _fact_to_dict(fact))
+                    await self._profile_builder.update(user_id, facts)
+            except Exception:
+                logger.warning("Fact extraction failed for user {}", user_id)
+
+
+def _fact_to_dict(fact: ExtractedFact) -> dict[str, Any]:
+    """Convert an ExtractedFact to a dict suitable for db_client.upsert_user_fact."""
+    content_hash = hashlib.sha256(f"{fact.category.value}:{fact.content}".encode()).hexdigest()
+    return {
+        "content": fact.content,
+        "content_hash": content_hash,
+        "category": fact.category.value,
+        "memory_type": fact.memory_type.value,
+        "importance": fact.importance,
+        "emotional_valence": fact.emotional_valence,
+        "tags": fact.tags,
+    }
+
+
+def _attach_images_to_last_user_message(
+    messages: list[dict[str, Any]],
+    images: list[str],
+) -> list[dict[str, Any]]:
+    """Return a copy of messages with images attached to the last user-role entry.
+
+    If no user message is found, appends a synthetic one.
+    """
+    new_messages = list(messages)
+    for i in range(len(new_messages) - 1, -1, -1):
+        if new_messages[i].get("role") == "user":
+            new_messages[i] = {**new_messages[i], "images": images}
+            return new_messages
+    # No user message found — append a synthetic one
+    new_messages.append({"role": "user", "content": "", "images": images})
+    return new_messages
 
 
 def _episode_messages_to_conversation(
