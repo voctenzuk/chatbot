@@ -62,6 +62,13 @@ Split packages only: `langchain_core`, `langchain_openai`. Never `from langchain
 Use `str | None` not `Optional[str]`. Never blanket `# type: ignore` — use `# pyright: ignore[reportSpecificRule]` with comment.
 </important>
 
+## Principles
+
+- **Boil the Lake:** When the complete solution costs minutes more than the shortcut, do the complete thing. Full test coverage, all edge cases, proper error handling. Only back off when the scope is an "ocean" (multi-week migration).
+- **Search Before Building:** Before designing solutions for unfamiliar patterns, check: (1) tried-and-true standard approach, (2) current best practices (`context7`, official docs), (3) first-principles reasoning. Prize first-principles insights above all.
+- **Verify, then claim:** Never say "tests pass" without fresh `uv run pytest` output in this session. See `.claude/rules/verification.md`.
+- **3-strike debugging:** After 3 failed fix attempts, stop and rethink the approach. See `.claude/rules/debugging.md`.
+
 ## Code Style
 
 - Python 3.13+, type hints on public functions, 100-char lines
@@ -94,11 +101,19 @@ Photo rate limit: atomic `try_consume_photo` RPC (race-safe, plan-tier-aware).
 
 `main` — production. Feature: `feature/<name>`, bugfix: `fix/<name>`. Squash merge preferred.
 
+## Workflow
+
+**New feature pipeline:** `/office-hours` → plan mode + `/autoplan` → `/implement` or `/add-feature` → `/review` + `/cso` → `/ship`
+
+Use `/careful` when touching Supabase migrations or prod data. Use `/investigate` for async debugging (follows 3-strike rule from `.claude/rules/debugging.md`).
+
 ## Domain Rules
 
 Loaded via `.claude/rules/` with path-based globs (only when touching relevant files):
-- `testing.md` — pytest conventions, fixtures, mocking, markers (`tests/**`)
 - `python-style.md` — ruff, pyright, imports, async patterns (`**/*.py`)
+- `verification.md` — verify before claiming done (`**/*.py`, `tests/**`)
+- `debugging.md` — 4-phase root-cause analysis, 3-strike rule (`src/**`, `tests/**`)
+- `testing.md` — pytest conventions, fixtures, mocking, markers (`tests/**`)
 - `aiogram.md` — handler conventions, filters, FSM, middleware (`handlers.py`, `app.py`)
 - `langchain.md` — imports, async invocation, LLMService pattern (`bot.llm/**`)
 - `memory-system.md` — mem0, episodes, context builder (`bot.memory/**`, `bot.conversation/**`)

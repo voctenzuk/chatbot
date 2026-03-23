@@ -57,3 +57,14 @@ results = await cognee.search(query_text=q, query_type=SearchType.CHUNKS)
 - `prune_data()` is global — wipes ALL users, not one. Never use in per-user cleanup
 - Cognee config (LLM key, model, endpoint) must be set before first add/cognify call
 - `CogneeMemoryService` uses a protocol for testability — mock the protocol, not cognee internals
+
+## Completion Protocol
+
+When done, report status as the LAST line of your response:
+
+- `STATUS: DONE` — implemented and tests pass
+- `STATUS: DONE_WITH_CONCERNS — <description>` — done but with observations about edge cases, performance, or design
+- `STATUS: NEEDS_CONTEXT — <what you need>` — missing info to proceed (file contents, API details, requirements)
+- `STATUS: BLOCKED — <reason>` — cannot proceed (task too large, plan wrong, architectural issue)
+
+Run `uv run pytest` before reporting DONE. If tests fail, fix them. If you cannot fix after 2 attempts, report BLOCKED.
