@@ -50,6 +50,7 @@ class SimpleLLMProvider:
             model=model,
             api_key=SecretStr(raw_key) if raw_key else None,
             base_url=base_url or settings.llm_base_url,
+            max_retries=5,
         )
 
     async def generate(

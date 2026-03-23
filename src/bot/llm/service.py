@@ -4,6 +4,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
+
+try:
+    from langfuse.langchain import CallbackHandler as LangfuseCallbackHandler
+except ImportError:
+    LangfuseCallbackHandler = None
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -56,6 +61,7 @@ class LLMService:
             api_key=SecretStr(settings.llm_api_key) if settings.llm_api_key else None,
             temperature=settings.llm_temperature,
             max_completion_tokens=settings.llm_max_tokens,
+            max_retries=5,
         )
         logger.info("LLMService initialised with model={}", settings.llm_model)
 
@@ -89,7 +95,16 @@ class LLMService:
         else:
             active_model = self._model
 
-        result = await active_model.ainvoke(lc_messages)
+        callbacks: list[Any] = []
+        if LangfuseCallbackHandler is not None:
+            try:
+                callbacks.append(LangfuseCallbackHandler())
+            except Exception as exc:
+                logger.debug("Langfuse callback init skipped: {}", exc)
+
+        result = await active_model.ainvoke(
+            lc_messages, config={"callbacks": callbacks} if callbacks else None
+        )
 
         usage: dict[str, Any] = getattr(result, "usage_metadata", {}) or {}
         meta: dict[str, Any] = getattr(result, "response_metadata", {}) or {}

@@ -43,6 +43,7 @@ class TestLLMServiceInit:
                 api_key=SecretStr("sk-test"),
                 temperature=0.5,
                 max_completion_tokens=512,
+                max_retries=5,
             )
 
     def test_llm_service_init_explicit(self):
