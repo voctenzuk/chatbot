@@ -7,12 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from bot.chat_pipeline import (
-    COST_PER_1M_INPUT,
-    COST_PER_1M_OUTPUT,
     LLM_FALLBACK,
     ChatPipeline,
     ChatResult,
 )
+from bot.config import settings
 from bot.llm.service import LLMResponse, ToolCall
 
 
@@ -234,7 +233,9 @@ class TestCostTrackingAndPhotoRateLimit:
             # Positional args: (user_id, msg_count=, tokens_in=, tokens_out=, cost_cents=)
             cost_cents = call_kwargs[0][4] if len(call_kwargs[0]) > 4 else None
         assert cost_cents is not None
-        expected = (1000 * COST_PER_1M_INPUT + 500 * COST_PER_1M_OUTPUT) / 1_000_000
+        expected = (
+            1000 * settings.cost_per_1m_input + 500 * settings.cost_per_1m_output
+        ) / 1_000_000
         assert abs(cost_cents - expected) < 1e-12
 
     @pytest.mark.asyncio
