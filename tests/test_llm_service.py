@@ -31,6 +31,7 @@ class TestLLMServiceInit:
             mock_settings.llm_api_key = "sk-test"
             mock_settings.llm_temperature = 0.5
             mock_settings.llm_max_tokens = 512
+            mock_settings.vision_model = None  # no vision model
 
             with patch("bot.llm.service.ChatOpenAI") as mock_chat:
                 _svc = LLMService()
@@ -58,6 +59,7 @@ class TestLLMServiceInit:
             mock_settings.llm_api_key = "sk-or-test"
             mock_settings.llm_temperature = 0.7
             mock_settings.llm_max_tokens = 1024
+            mock_settings.vision_model = None  # no vision model
 
             _svc = LLMService()
 
@@ -83,6 +85,7 @@ class TestLLMServiceInit:
             mock_settings.llm_api_key = "sk-test"
             mock_settings.llm_temperature = 0.5
             mock_settings.llm_max_tokens = 512
+            mock_settings.vision_model = None  # no vision model
 
             _svc = LLMService()
 
@@ -92,7 +95,7 @@ class TestLLMServiceInit:
         """Explicit model param overrides config-based creation."""
         mock_model = MagicMock()
         svc = LLMService(model=mock_model)
-        assert svc._model is mock_model
+        assert svc._default_model is mock_model
 
 
 class TestLLMServiceGenerate:

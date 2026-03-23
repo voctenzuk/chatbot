@@ -1,5 +1,8 @@
 """Telegram bot handlers — thin aiogram wrappers delegating to ChatPipeline."""
 
+import base64
+import mimetypes
+from io import BytesIO
 from typing import Any
 
 from aiogram import F, Router
@@ -9,6 +12,7 @@ from loguru import logger
 
 from bot.character import CharacterConfig
 from bot.chat_pipeline import LLM_FALLBACK, ChatPipeline
+from bot.config import settings
 
 router = Router()
 
@@ -186,19 +190,28 @@ async def stats(message: Message, pipeline: ChatPipeline) -> None:
         await message.answer("Не удалось загрузить статистику. Попробуй позже.")
 
 
+# Catch-all handler — MUST be registered last
 @router.message()
 async def chat(message: Message, pipeline: ChatPipeline) -> None:
     """Handle regular chat messages — delegates to ChatPipeline."""
     user_id = message.from_user.id if message.from_user else 0
     user_name = getattr(message.from_user, "first_name", None) if message.from_user else None
-    content = message.text or ""
 
-    if not content:
-        content = _extract_message_content(message)
+    try:
+        text, images = await _extract_message_content(message)
+    except ValueError as exc:
+        await message.answer(str(exc))
+        return
+    except RuntimeError as exc:
+        await message.answer(str(exc))
+        return
 
     try:
         result = await pipeline.handle_message(
-            user_id=user_id, content=content, user_name=user_name
+            user_id=user_id,
+            content=text,
+            images=images,
+            user_name=user_name,
         )
 
         # Deliver response via Telegram
@@ -220,27 +233,78 @@ async def chat(message: Message, pipeline: ChatPipeline) -> None:
         await message.answer("Я тебя услышала, но что-то пошло не так. Попробуй ещё раз.")
 
 
-def _extract_message_content(message: Message) -> str:
-    """Extract content from non-text messages."""
-    parts = []
-    if message.caption:
-        parts.append(f"[Caption: {message.caption}]")
+async def _extract_message_content(message: Message) -> tuple[str, list[str] | None]:
+    """Extract content and optional image data URLs from a Telegram message.
+
+    Returns:
+        (text, images) where images is a list of base64 data URLs or None.
+
+    Raises:
+        ValueError: if the photo exceeds the configured size limit.
+        RuntimeError: if the photo download fails.
+    """
     if message.photo:
-        parts.append("[Photo attached]")
-    if message.document:
-        parts.append(f"[Document: {message.document.file_name or 'unnamed'}]")
-    if message.voice:
-        parts.append("[Voice message]")
-    if message.video:
-        parts.append("[Video attached]")
-    if message.audio:
-        parts.append("[Audio attached]")
+        photo = message.photo[-1]  # largest available size
+
+        max_bytes = int(settings.max_image_size_mb * 1024 * 1024)
+        if photo.file_size and photo.file_size > max_bytes:
+            raise ValueError("Ой, фотка слишком большая! Попробуй отправить поменьше 📸")
+
+        try:
+            bot = message.bot
+            if bot is None:
+                raise RuntimeError("Не смогла загрузить фотку, попробуй ещё раз!")
+            file = await bot.get_file(photo.file_id)
+            buf = BytesIO()
+            await bot.download_file(file.file_path, buf)  # type: ignore[arg-type]
+        except (ValueError, RuntimeError):
+            raise
+        except Exception as exc:
+            raise RuntimeError("Не смогла загрузить фотку, попробуй ещё раз!") from exc
+
+        mime_type = "image/jpeg"  # Telegram photos are always JPEG
+        if file.file_path:
+            guessed = mimetypes.guess_type(file.file_path)[0]
+            if guessed:
+                mime_type = guessed
+
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        buf.close()
+        data_url = f"data:{mime_type};base64,{b64}"
+        text = message.caption or "Что на этом фото?"
+        return text, [data_url]
+
+    # Non-photo media: preserve message.caption if present
+    caption = message.caption or ""
+
     if message.sticker:
-        parts.append(f"[Sticker: {message.sticker.emoji or 'emoji'}]")
+        emoji = message.sticker.emoji or "emoji"
+        return f"[Стикер: {emoji}]", None
+
+    if message.voice:
+        label = "[Голосовое сообщение]"
+        return f"{caption} {label}".strip() if caption else label, None
+
+    if message.video:
+        label = "[Видео]"
+        return f"{caption} {label}".strip() if caption else label, None
+
+    if message.audio:
+        label = "[Аудио]"
+        return f"{caption} {label}".strip() if caption else label, None
+
+    if message.document:
+        name = message.document.file_name or "unnamed"
+        label = f"[Документ: {name}]"
+        return f"{caption} {label}".strip() if caption else label, None
+
     if message.location:
-        parts.append(f"[Location: {message.location.latitude}, {message.location.longitude}]")
+        lat = message.location.latitude
+        lon = message.location.longitude
+        return f"[Местоположение: {lat}, {lon}]", None
+
     if message.contact:
-        parts.append(f"[Contact: {message.contact.first_name or 'unnamed'}]")
-    if not parts:
-        parts.append("[Non-text message]")
-    return " ".join(parts)
+        name = message.contact.first_name or "unnamed"
+        return f"[Контакт: {name}]", None
+
+    return message.text or "", None
