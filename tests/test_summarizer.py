@@ -1,13 +1,14 @@
 """Tests for Summarizer service."""
 
 import json
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from bot.conversation.summarizer import (
     ArtifactReference,
     FactCandidate,
+    SimpleLLMProvider,
     Summarizer,
     SummarizerConfig,
     SummaryJSON,
@@ -294,6 +295,67 @@ class TestSummarizerConfig:
 
         assert config.running_summary_interval == 5
         assert config.min_fact_confidence == 0.8
+
+
+class TestSimpleLLMProvider:
+    """Tests for the default LangChain-backed provider."""
+
+    @pytest.mark.asyncio
+    async def test_generate_builds_model_lazily_and_reuses_it(self):
+        """Model should be constructed on first generate call and then cached."""
+        mock_model = MagicMock()
+        mock_bound = MagicMock()
+        mock_bound.ainvoke = AsyncMock(return_value=MagicMock(content="Generated text"))
+        mock_model.bind.return_value = mock_bound
+
+        with patch(
+            "bot.conversation.summarizer.ChatOpenAI", return_value=mock_model
+        ) as chat_openai:
+            provider = SimpleLLMProvider(
+                api_key="secret", model="test-model", base_url="https://llm"
+            )
+
+            assert provider._model is None
+
+            result_1 = await provider.generate(
+                "Hello",
+                temperature=0.3,
+                config={"run_name": "summary"},
+            )
+            result_2 = await provider.generate("Hello again", temperature=0.8)
+
+        assert result_1 == "Generated text"
+        assert result_2 == "Generated text"
+        chat_openai.assert_called_once()
+        _, kwargs = chat_openai.call_args
+        assert kwargs["model"] == "test-model"
+        assert kwargs["base_url"] == "https://llm"
+        assert kwargs["api_key"].get_secret_value() == "secret"
+        assert kwargs["max_retries"] == 5
+        assert mock_model.bind.call_count == 2
+        first_call = mock_bound.ainvoke.await_args_list[0]
+        assert first_call.args[0][0].content == "Hello"
+        assert first_call.kwargs["config"] == {"run_name": "summary"}
+        second_call = mock_bound.ainvoke.await_args_list[1]
+        assert second_call.args[0][0].content == "Hello again"
+        assert second_call.kwargs["config"] is None
+
+    def test_get_model_omits_api_key_when_missing(self):
+        """Provider should pass through a missing API key cleanly."""
+        mock_model = MagicMock()
+
+        with patch(
+            "bot.conversation.summarizer.ChatOpenAI", return_value=mock_model
+        ) as chat_openai:
+            provider = SimpleLLMProvider(
+                api_key=None, model="test-model", base_url="https://llm"
+            )
+
+            returned_model = provider._get_model()
+
+        assert returned_model is mock_model
+        _, kwargs = chat_openai.call_args
+        assert kwargs["api_key"] is None
 
 
 class TestSummarizerInit:

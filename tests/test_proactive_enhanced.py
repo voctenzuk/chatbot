@@ -232,6 +232,7 @@ class TestPersonalizedPrompt:
         )
         assert "программирование" in prompt_content
         assert "кофе" in prompt_content
+        assert "кино" not in prompt_content
 
     @pytest.mark.asyncio
     async def test_prompt_unchanged_when_profile_empty(self, scheduler_with_deps, mock_langfuse):
