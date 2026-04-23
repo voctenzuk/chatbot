@@ -347,9 +347,7 @@ class TestSimpleLLMProvider:
         with patch(
             "bot.conversation.summarizer.ChatOpenAI", return_value=mock_model
         ) as chat_openai:
-            provider = SimpleLLMProvider(
-                api_key=None, model="test-model", base_url="https://llm"
-            )
+            provider = SimpleLLMProvider(api_key=None, model="test-model", base_url="https://llm")
 
             returned_model = provider._get_model()
 
