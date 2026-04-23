@@ -16,7 +16,7 @@
 ---
 
 ## Conceptual Model
-We implement **four product layers**, backed by **mem0** for knowledge-graph memory.
+We implement **four product layers**, backed by **mem0** for vector-based memory.
 
 ### Product Layers (canonical in our app)
 1) **Working memory (short-term)**

@@ -10,5 +10,5 @@ When you ask for code changes, include:
 
 ## Rules of engagement
 - Create a new branch and **push early** so progress is visible.
-- Before opening a PR: run `ruff format .`, `ruff check .`, `pytest`.
+- Before opening a PR: run `ruff format .`, `ruff check .`, `pyright`, `pytest`.
 - Open a PR to `main` with `Closes #...` and leave a short summary comment.

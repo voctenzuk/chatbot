@@ -67,3 +67,12 @@ uv run pytest tests/test_<module>.py -k "TestClass" -v   # specific class
 uv run pytest --cov=bot --cov-branch                     # with coverage
 uv run pytest -m "not slow"                              # skip slow
 ```
+
+## Completion Protocol
+
+When done, report status as the LAST line of your response:
+
+- `STATUS: DONE` — tests written/fixed and all pass
+- `STATUS: DONE_WITH_CONCERNS — <description>` — tests pass but with observations (low coverage, complex mocking)
+- `STATUS: NEEDS_CONTEXT — <what you need>` — missing info to proceed
+- `STATUS: BLOCKED — <reason>` — cannot proceed (untestable code, missing fixtures)

@@ -6,6 +6,10 @@ generation), and greeting. For MVP, a single hardcoded character is used.
 
 from dataclasses import dataclass
 
+SPRITE_EMOTIONS: tuple[str, ...] = ("smile", "sad", "laugh", "thinking", "wink")
+"""Available emotion sprites. Single source of truth — used by CharacterConfig
+and SEND_SPRITE_TOOL enum."""
+
 
 @dataclass(frozen=True)
 class CharacterConfig:
@@ -20,6 +24,10 @@ class CharacterConfig:
         greeting: First message sent to new users on /start (Russian).
         example_messages: Few-shot examples of character responses for system
             prompt. Adds ~100-150 tokens per turn to input cost.
+        reference_image_url: Supabase Storage URL for identity-preserving
+            image generation (e.g., SeeDream 4.5 reference input).
+        sprite_urls: Mapping of emotion name → Supabase Storage URL for
+            pre-generated emotion sprites. Keys must be from SPRITE_EMOTIONS.
     """
 
     name: str
@@ -28,6 +36,8 @@ class CharacterConfig:
     voice_style: str
     greeting: str
     example_messages: list[str]
+    reference_image_url: str | None = None
+    sprite_urls: dict[str, str] | None = None
 
 
 DEFAULT_CHARACTER = CharacterConfig(

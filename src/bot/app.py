@@ -36,21 +36,34 @@ async def _amain() -> None:
     dp["pipeline"] = ctx.pipeline
     dp["db_client"] = ctx.db_client
 
-    # Bridge composed services to legacy singletons for ProactiveScheduler
-    # (it still calls get_*() internally — P3 TODO to refactor)
+    # Bridge composed services to singletons used by infra modules
     set_llm_service(ctx.llm)
     set_episode_manager(ctx.episode_manager)
     set_langfuse_service(ctx.langfuse)
     if ctx.db_client is not None:
         set_db_client(ctx.db_client)
 
-    # Start proactive scheduler (best-effort, needs bot for TelegramDelivery)
+    # Start proactive scheduler with full dependency injection (needs bot for delivery)
     try:
         delivery = TelegramDelivery(bot)
-        scheduler = ProactiveScheduler(delivery)
+        scheduler = ProactiveScheduler(
+            delivery=delivery,
+            llm=ctx.llm,
+            db_client=ctx.db_client,
+            episode_manager=ctx.episode_manager,
+            relationship_scorer=ctx.relationship_scorer,
+            profile_builder=ctx.profile_builder,
+            character=ctx.character,
+        )
         scheduler.start()
         set_proactive_scheduler(scheduler)
         ctx.scheduler = scheduler
+
+        # Wire milestone callback: breaks the circular dep by setting after both exist.
+        if ctx.relationship_scorer is not None:
+            ctx.relationship_scorer.set_milestone_callback(scheduler.send_milestone_message)
+
+        logger.info("ProactiveScheduler started with full dependency injection")
     except Exception as e:
         logger.warning("Proactive scheduler failed to start: {}", e)
 

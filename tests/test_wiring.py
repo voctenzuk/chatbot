@@ -3,7 +3,9 @@
 import asyncio
 from unittest.mock import MagicMock, patch
 
-from bot.wiring import AppContext, build_app_context
+import pytest
+
+from bot.wiring import AppContext, _StubLangfuse, build_app_context
 
 # Patch paths — imports happen inside build_app_context, so we patch at source
 _P_LLM = "bot.llm.service.LLMService"
@@ -13,6 +15,16 @@ _P_EM = "bot.conversation.episode_manager.EpisodeManager"
 _P_DB = "bot.infra.db_client.DatabaseClient"
 _P_MEM = "bot.memory.mem0_service.Mem0MemoryService"
 _P_IMG = "bot.media.image_service.ImageService"
+_P_SETTINGS = "bot.config.settings"
+
+
+def _mock_settings(**overrides: object) -> MagicMock:
+    """Create a mock settings object with sensible defaults for build_app_context."""
+    s = MagicMock()
+    s.llm_api_key = overrides.get("llm_api_key", "test-key")
+    s.langfuse_enabled = overrides.get("langfuse_enabled", True)
+    s.langfuse_public_key = overrides.get("langfuse_public_key", "pk-test")
+    return s
 
 
 def _patch_required(**overrides: MagicMock):
@@ -147,6 +159,7 @@ class TestBuildAppContext:
         mock_em = MagicMock()
 
         with (
+            patch(_P_SETTINGS, _mock_settings()),
             patch(_P_LLM, return_value=mock_llm),
             patch(_P_CTX, return_value=mock_ctx),
             patch(_P_LF, return_value=mock_lf),
@@ -172,6 +185,7 @@ class TestBuildAppContext:
         mock_img = MagicMock()
 
         with (
+            patch(_P_SETTINGS, _mock_settings()),
             patch(_P_LLM, return_value=MagicMock()),
             patch(_P_CTX, return_value=MagicMock()),
             patch(_P_LF, return_value=MagicMock()),
@@ -189,6 +203,7 @@ class TestBuildAppContext:
 
     async def test_memory_unavailable(self) -> None:
         with (
+            patch(_P_SETTINGS, _mock_settings()),
             patch(_P_LLM, return_value=MagicMock()),
             patch(_P_CTX, return_value=MagicMock()),
             patch(_P_LF, return_value=MagicMock()),
@@ -203,6 +218,7 @@ class TestBuildAppContext:
     async def test_db_unavailable_episode_manager_gets_none(self) -> None:
         mock_em_cls = MagicMock()
         with (
+            patch(_P_SETTINGS, _mock_settings()),
             patch(_P_LLM, return_value=MagicMock()),
             patch(_P_CTX, return_value=MagicMock()),
             patch(_P_LF, return_value=MagicMock()),
@@ -217,6 +233,7 @@ class TestBuildAppContext:
 
     async def test_image_unavailable(self) -> None:
         with (
+            patch(_P_SETTINGS, _mock_settings()),
             patch(_P_LLM, return_value=MagicMock()),
             patch(_P_CTX, return_value=MagicMock()),
             patch(_P_LF, return_value=MagicMock()),
@@ -230,6 +247,7 @@ class TestBuildAppContext:
 
     async def test_langfuse_failure_creates_stub(self) -> None:
         with (
+            patch(_P_SETTINGS, _mock_settings()),
             patch(_P_LLM, return_value=MagicMock()),
             patch(_P_CTX, return_value=MagicMock()),
             patch(_P_LF, side_effect=RuntimeError("no langfuse")),
@@ -248,6 +266,7 @@ class TestBuildAppContext:
         mock_db = MagicMock()
         mock_em_cls = MagicMock()
         with (
+            patch(_P_SETTINGS, _mock_settings()),
             patch(_P_LLM, return_value=MagicMock()),
             patch(_P_CTX, return_value=MagicMock()),
             patch(_P_LF, return_value=MagicMock()),
@@ -258,3 +277,29 @@ class TestBuildAppContext:
         ):
             await build_app_context()
         mock_em_cls.assert_called_once_with(db_client=mock_db)
+
+    async def test_langfuse_disabled_creates_stub(self) -> None:
+        """When langfuse_enabled=False, build_app_context creates a _StubLangfuse."""
+        with (
+            patch(_P_SETTINGS, _mock_settings(langfuse_enabled=False, langfuse_public_key=None)),
+            patch(_P_LLM, return_value=MagicMock()),
+            patch(_P_CTX, return_value=MagicMock()),
+            patch(_P_LF, return_value=MagicMock()),
+            patch(_P_EM, return_value=MagicMock()),
+            patch(_P_DB, side_effect=RuntimeError("no db")),
+            patch(_P_MEM, side_effect=RuntimeError("no mem0")),
+            patch(_P_IMG, side_effect=RuntimeError("no openai")),
+        ):
+            ctx = await build_app_context()
+
+        assert isinstance(ctx.langfuse, _StubLangfuse)
+        # trace() is a no-op context manager
+        with ctx.langfuse.trace(user_id=1):
+            pass  # should not raise
+        # flush() is a no-op
+        ctx.langfuse.flush()
+
+    async def test_llm_api_key_missing_raises_system_exit(self) -> None:
+        """When llm_api_key is empty, build_app_context raises SystemExit."""
+        with patch(_P_SETTINGS, _mock_settings(llm_api_key="")), pytest.raises(SystemExit):
+            await build_app_context()

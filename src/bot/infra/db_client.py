@@ -1002,6 +1002,152 @@ class DatabaseClient:
             logger.error("Failed to get artifact surrogates for context: {}", e)
             return []
 
+    async def record_payment(
+        self,
+        telegram_user_id: int,
+        amount_cents: int,
+        provider_payment_id: str,
+        status: str = "succeeded",
+    ) -> bool:
+        """Record a payment via Supabase RPC. Idempotent (ON CONFLICT DO NOTHING).
+
+        Returns True if a new payment was recorded, False if duplicate or error.
+        """
+        try:
+            result = self._client.rpc(
+                "record_payment",
+                {
+                    "p_user_id": telegram_user_id,
+                    "p_amount_cents": amount_cents,
+                    "p_provider_payment_id": provider_payment_id,
+                    "p_status": status,
+                },
+            ).execute()
+            return bool(result.data)
+        except Exception as exc:
+            logger.warning("Failed to record payment for user {}: {}", telegram_user_id, exc)
+            return False
+
+    async def upsert_user_fact(self, user_id: int, fact: dict[str, Any]) -> None:
+        """Insert or update a user fact row (deduped by content_hash).
+
+        Args:
+            user_id: Telegram user ID.
+            fact: Dict with keys: content, content_hash, category, memory_type,
+                  importance, emotional_valence, tags.
+        """
+        try:
+            row = {
+                "user_id": user_id,
+                "content": fact["content"],
+                "content_hash": fact["content_hash"],
+                "category": fact["category"],
+                "memory_type": fact["memory_type"],
+                "importance": fact.get("importance", 1.0),
+                "emotional_valence": fact.get("emotional_valence", 0.0),
+                "tags": fact.get("tags", []),
+                "updated_at": datetime.now(UTC).isoformat(),
+            }
+            self._client.table("user_facts").upsert(
+                row, on_conflict="user_id,content_hash"
+            ).execute()
+        except Exception as e:
+            logger.error("Failed to upsert user fact for user {}: {}", user_id, e)
+            raise
+
+    async def get_user_facts(self, user_id: int) -> list[dict[str, Any]]:
+        """Get all fact rows for a user.
+
+        Args:
+            user_id: Telegram user ID.
+
+        Returns:
+            List of raw fact dicts, empty on error.
+        """
+        try:
+            response = (
+                self._client.table("user_facts")
+                .select("*")
+                .eq("user_id", user_id)
+                .order("created_at", desc=False)
+                .execute()
+            )
+            return response.data or []
+        except Exception as e:
+            logger.error("Failed to get user facts for user {}: {}", user_id, e)
+            return []
+
+    async def get_user_facts_summary(self, user_id: int) -> dict[str, Any]:
+        """Call get_user_facts_summary RPC for relationship scoring.
+
+        Args:
+            user_id: Telegram user ID.
+
+        Returns:
+            Dict with personal_disclosures, relationship_memories, avg_emotional_depth.
+        """
+        try:
+            response = self._client.rpc(
+                "get_user_facts_summary",
+                {"p_user_id": user_id},
+            ).execute()
+            row = self._extract_rpc_row(response.data)
+            if row:
+                return {
+                    "personal_disclosures": int(row.get("personal_disclosures", 0)),
+                    "relationship_memories": int(row.get("relationship_memories", 0)),
+                    "avg_emotional_depth": float(row.get("avg_emotional_depth", 0.0)),
+                }
+            return {
+                "personal_disclosures": 0,
+                "relationship_memories": 0,
+                "avg_emotional_depth": 0.0,
+            }
+        except Exception as e:
+            logger.error("Failed to get user facts summary for user {}: {}", user_id, e)
+            return {
+                "personal_disclosures": 0,
+                "relationship_memories": 0,
+                "avg_emotional_depth": 0.0,
+            }
+
+    async def get_message_stats(self, user_id: int) -> dict[str, Any]:
+        """Call get_message_stats RPC for relationship scoring.
+
+        Args:
+            user_id: Telegram user ID.
+
+        Returns:
+            Dict with total_messages, days_active, consecutive_days, days_since_last.
+        """
+        try:
+            response = self._client.rpc(
+                "get_message_stats",
+                {"p_user_id": user_id},
+            ).execute()
+            row = self._extract_rpc_row(response.data)
+            if row:
+                return {
+                    "total_messages": int(row.get("total_messages", 0)),
+                    "days_active": int(row.get("days_active", 0)),
+                    "consecutive_days": int(row.get("consecutive_days", 0)),
+                    "days_since_last": int(row.get("days_since_last", 0)),
+                }
+            return {
+                "total_messages": 0,
+                "days_active": 0,
+                "consecutive_days": 0,
+                "days_since_last": 0,
+            }
+        except Exception as e:
+            logger.error("Failed to get message stats for user {}: {}", user_id, e)
+            return {
+                "total_messages": 0,
+                "days_active": 0,
+                "consecutive_days": 0,
+                "days_since_last": 0,
+            }
+
     async def activate_subscription(
         self,
         telegram_user_id: int,

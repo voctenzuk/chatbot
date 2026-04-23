@@ -69,3 +69,14 @@ async def handler(message: Message) -> None:
 - Catch-all `@router.message()` with no filter MUST be registered last — it matches everything
 - `CallbackData` subclass needs `prefix="..."` and typed fields; filter with `.filter()`
 - `@router.errors()` exists for centralized error handling but current pattern is try/except per handler
+
+## Completion Protocol
+
+When done, report status as the LAST line of your response:
+
+- `STATUS: DONE` — implemented and tests pass
+- `STATUS: DONE_WITH_CONCERNS — <description>` — done but with observations about edge cases, performance, or design
+- `STATUS: NEEDS_CONTEXT — <what you need>` — missing info to proceed (file contents, API details, requirements)
+- `STATUS: BLOCKED — <reason>` — cannot proceed (task too large, plan wrong, architectural issue)
+
+Run `uv run pytest` before reporting DONE. If tests fail, fix them. If you cannot fix after 2 attempts, report BLOCKED.

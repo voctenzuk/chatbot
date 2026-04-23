@@ -6,6 +6,7 @@ from bot.conversation.system_prompt import (
     _sanitize_user_name,
     get_system_prompt,
 )
+from bot.memory.relationship_scorer import RelationshipLevel, RelationshipTier
 
 
 class TestSystemPrompt:
@@ -118,3 +119,67 @@ class TestSystemPromptInjectionProtection:
     def test_safe_name_still_works(self):
         result = get_system_prompt(user_name="Алиса")
         assert "Алиса" in result
+
+
+# ---------------------------------------------------------------------------
+# Relationship tier injection
+# ---------------------------------------------------------------------------
+
+
+def _make_level(tier: RelationshipTier, score: float = 1.0) -> RelationshipLevel:
+    return RelationshipLevel(score=score, tier=tier, level=int(score))
+
+
+class TestSystemPromptRelationshipTier:
+    def test_no_relationship_level_no_tier_text(self) -> None:
+        """Backward compat: no relationship_level → no tier instructions appended."""
+        result = get_system_prompt()
+        # None of the tier-specific Russian phrases should appear
+        assert "только начинаешь знакомиться" not in result
+        assert "близкие друзья" not in result
+        assert "самый близкий друг" not in result
+
+    def test_acquaintance_tier_text_included(self) -> None:
+        level = _make_level(RelationshipTier.ACQUAINTANCE)
+        result = get_system_prompt(relationship_level=level)
+        assert "только начинаешь знакомиться" in result
+
+    def test_friend_tier_text_included(self) -> None:
+        level = _make_level(RelationshipTier.FRIEND, score=4.0)
+        result = get_system_prompt(relationship_level=level)
+        assert "Вы уже друзья" in result
+
+    def test_close_friend_tier_text_included(self) -> None:
+        level = _make_level(RelationshipTier.CLOSE_FRIEND, score=7.0)
+        result = get_system_prompt(relationship_level=level)
+        assert "близкие друзья" in result
+
+    def test_intimate_tier_text_included(self) -> None:
+        level = _make_level(RelationshipTier.INTIMATE, score=9.5)
+        result = get_system_prompt(relationship_level=level)
+        assert "самый близкий друг" in result
+
+    def test_relationship_level_none_backward_compat(self) -> None:
+        result_none = get_system_prompt(relationship_level=None)
+        result_no_arg = get_system_prompt()
+        assert result_none == result_no_arg
+
+    def test_tier_appended_after_base_prompt(self) -> None:
+        level = _make_level(RelationshipTier.FRIEND, score=4.0)
+        result = get_system_prompt(relationship_level=level)
+        # Base prompt must appear before tier text
+        tier_pos = result.index("Вы уже друзья")
+        base_pos = result.index(DEFAULT_SYSTEM_PROMPT[:20])
+        assert base_pos < tier_pos
+
+    def test_tier_appended_with_character(self) -> None:
+        level = _make_level(RelationshipTier.INTIMATE, score=9.5)
+        result = get_system_prompt(character=DEFAULT_CHARACTER, relationship_level=level)
+        assert DEFAULT_CHARACTER.personality in result
+        assert "самый близкий друг" in result
+
+    def test_acquaintance_does_not_include_intimate_text(self) -> None:
+        level = _make_level(RelationshipTier.ACQUAINTANCE)
+        result = get_system_prompt(relationship_level=level)
+        assert "самый близкий друг" not in result
+        assert "Ваше общение — как между людьми" not in result

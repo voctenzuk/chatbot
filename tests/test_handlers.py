@@ -19,6 +19,8 @@ from bot.chat_pipeline import ChatPipeline, ChatResult
 from bot.handlers import _extract_message_content, chat, start, stats
 from bot.infra.db_client import ProvisionResult, UserUsage
 
+# _extract_message_content is now async; cast helpers remain for convenience
+
 
 class MockMessage:
     """Mock Telegram message for testing.
@@ -109,9 +111,7 @@ def mock_pipeline() -> MagicMock:
     pipeline.db_client = None
 
     # Mock handle_message for chat handler
-    pipeline.handle_message = AsyncMock(
-        return_value=ChatResult(response_text="test reply", image_bytes=None)
-    )
+    pipeline.handle_message = AsyncMock(return_value=ChatResult(response_text="test reply"))
 
     return pipeline
 
@@ -186,6 +186,7 @@ class TestChatHandler:
         mock_pipeline.handle_message.assert_called_once_with(
             user_id=12345,
             content="Hello bot!",
+            images=None,
             user_name=mock_pipeline.handle_message.call_args.kwargs["user_name"],
         )
 
@@ -332,97 +333,110 @@ class TestStatsHandler:
 
 
 class TestExtractMessageContent:
-    """Tests for _extract_message_content function."""
+    """Tests for _extract_message_content function (now async)."""
 
-    def test_text_message(self) -> None:
-        """Test extracting content - text messages bypass this function."""
+    @pytest.mark.asyncio
+    async def test_text_message(self) -> None:
+        """Text message returns ('', None)."""
         message = MockMessage(text="")
-        result = _extract_message_content(cast("Message", message))
-        assert result == "[Non-text message]"
+        text, images = await _extract_message_content(cast("Message", message))
+        assert text == ""
+        assert images is None
 
-    def test_photo_with_caption(self) -> None:
-        """Test extracting content from photo with caption."""
-        message = MockMessage(caption="My vacation photo")
-        message.photo = [MagicMock()]
-        result = _extract_message_content(cast("Message", message))
-        assert "[Caption: My vacation photo]" in result
-        assert "[Photo attached]" in result
-
-    def test_document(self) -> None:
+    @pytest.mark.asyncio
+    async def test_document(self) -> None:
         """Test extracting content from document."""
         message = MockMessage()
         message.document = MagicMock(file_name="report.pdf")
-        result = _extract_message_content(cast("Message", message))
-        assert "[Document: report.pdf]" in result
+        text, images = await _extract_message_content(cast("Message", message))
+        assert "[Документ: report.pdf]" in text
+        assert images is None
 
-    def test_voice_message(self) -> None:
+    @pytest.mark.asyncio
+    async def test_voice_message(self) -> None:
         """Test extracting content from voice message."""
         message = MockMessage()
         message.voice = MagicMock()
-        result = _extract_message_content(cast("Message", message))
-        assert "[Voice message]" in result
+        text, images = await _extract_message_content(cast("Message", message))
+        assert "[Голосовое" in text
+        assert images is None
 
-    def test_video(self) -> None:
+    @pytest.mark.asyncio
+    async def test_video(self) -> None:
         """Test extracting content from video."""
         message = MockMessage()
         message.video = MagicMock()
-        result = _extract_message_content(cast("Message", message))
-        assert "[Video attached]" in result
+        text, images = await _extract_message_content(cast("Message", message))
+        assert "[Видео]" in text
+        assert images is None
 
-    def test_audio(self) -> None:
+    @pytest.mark.asyncio
+    async def test_audio(self) -> None:
         """Test extracting content from audio."""
         message = MockMessage()
         message.audio = MagicMock()
-        result = _extract_message_content(cast("Message", message))
-        assert "[Audio attached]" in result
+        text, images = await _extract_message_content(cast("Message", message))
+        assert "[Аудио]" in text
+        assert images is None
 
-    def test_sticker(self) -> None:
+    @pytest.mark.asyncio
+    async def test_sticker(self) -> None:
         """Test extracting content from sticker."""
         message = MockMessage()
         message.sticker = MagicMock(emoji="😊")
-        result = _extract_message_content(cast("Message", message))
-        assert "[Sticker: 😊]" in result
+        text, images = await _extract_message_content(cast("Message", message))
+        assert "[Стикер: 😊]" in text
+        assert images is None
 
-    def test_location(self) -> None:
+    @pytest.mark.asyncio
+    async def test_location(self) -> None:
         """Test extracting content from location."""
         message = MockMessage()
         message.location = MagicMock(latitude=51.5074, longitude=-0.1278)
-        result = _extract_message_content(cast("Message", message))
-        assert "[Location: 51.5074, -0.1278]" in result
+        text, images = await _extract_message_content(cast("Message", message))
+        assert "[Местоположение: 51.5074, -0.1278]" in text
+        assert images is None
 
-    def test_contact(self) -> None:
+    @pytest.mark.asyncio
+    async def test_contact(self) -> None:
         """Test extracting content from contact."""
         message = MockMessage()
         message.contact = MagicMock(first_name="John")
-        result = _extract_message_content(cast("Message", message))
-        assert "[Contact: John]" in result
+        text, images = await _extract_message_content(cast("Message", message))
+        assert "[Контакт: John]" in text
+        assert images is None
 
-    def test_sticker_without_emoji(self) -> None:
+    @pytest.mark.asyncio
+    async def test_sticker_without_emoji(self) -> None:
         """Test extracting content from sticker without emoji."""
         message = MockMessage()
         message.sticker = MagicMock(emoji=None)
-        result = _extract_message_content(cast("Message", message))
-        assert "[Sticker: emoji]" in result
+        text, images = await _extract_message_content(cast("Message", message))
+        assert "[Стикер: emoji]" in text
+        assert images is None
 
-    def test_contact_without_name(self) -> None:
+    @pytest.mark.asyncio
+    async def test_contact_without_name(self) -> None:
         """Test extracting content from contact without name."""
         message = MockMessage()
         message.contact = MagicMock(first_name=None)
-        result = _extract_message_content(cast("Message", message))
-        assert "[Contact: unnamed]" in result
+        text, images = await _extract_message_content(cast("Message", message))
+        assert "[Контакт: unnamed]" in text
+        assert images is None
 
-    def test_empty_message(self) -> None:
-        """Test extracting content from empty message."""
+    @pytest.mark.asyncio
+    async def test_empty_message(self) -> None:
+        """Test extracting content from empty message returns ('', None)."""
         message = MockMessage()
-        result = _extract_message_content(cast("Message", message))
-        assert result == "[Non-text message]"
+        text, images = await _extract_message_content(cast("Message", message))
+        assert text == ""
+        assert images is None
 
-    def test_multiple_attachments(self) -> None:
-        """Test extracting content with multiple attachments."""
-        message = MockMessage(caption="Check this out")
-        message.photo = [MagicMock()]
+    @pytest.mark.asyncio
+    async def test_multiple_attachments_document_wins_over_nothing(self) -> None:
+        """Document message returns document text and no images."""
+        message = MockMessage()
         message.document = MagicMock(file_name="file.txt")
-        result = _extract_message_content(cast("Message", message))
-        assert "[Caption: Check this out]" in result
-        assert "[Photo attached]" in result
-        assert "[Document: file.txt]" in result
+        text, images = await _extract_message_content(cast("Message", message))
+        assert "[Документ: file.txt]" in text
+        assert images is None

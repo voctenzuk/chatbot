@@ -162,9 +162,8 @@ Persistent history for trend tracking across weeks.
 ## Branch Conventions
 
 - **`main`** — production
-- **`develop`** — integration
-- **`feature/<name>`** — new features (from `develop`)
-- **`fix/<name>`** — bugfixes (from `develop`, or `main` for hotfixes)
+- **`feature/<name>`** — new features (from `main`)
+- **`fix/<name>`** — bugfixes (from `main`)
 - Squash or rebase merge preferred
 
 ## CI Requirements

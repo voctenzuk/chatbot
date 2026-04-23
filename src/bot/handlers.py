@@ -1,5 +1,8 @@
 """Telegram bot handlers — thin aiogram wrappers delegating to ChatPipeline."""
 
+import base64
+import mimetypes
+from io import BytesIO
 from typing import Any
 
 from aiogram import F, Router
@@ -9,6 +12,7 @@ from loguru import logger
 
 from bot.character import CharacterConfig
 from bot.chat_pipeline import LLM_FALLBACK, ChatPipeline
+from bot.config import settings
 
 router = Router()
 
@@ -46,10 +50,10 @@ async def start(message: Message, pipeline: ChatPipeline) -> None:
             img_service = pipeline.image_service
             if img_service is not None:
                 try:
-                    photo = await img_service.generate("casual selfie, smiling warmly", user_id)
-                    if photo:
+                    result = await img_service.generate("casual selfie, smiling warmly", user_id)
+                    if result:
                         await message.answer_photo(
-                            photo=BufferedInputFile(photo, filename="hello.png"),
+                            photo=BufferedInputFile(result.image_bytes, filename="hello.png"),
                         )
                 except Exception as e:
                     logger.warning("Onboarding photo failed for user {}: {}", user_id, e)
@@ -81,7 +85,7 @@ async def upgrade(message: Message) -> None:
         title="Plus подписка",
         description="100 сообщений в день + фото. 30 дней.",
         payload="plan:plus",
-        provider_token="",
+        provider_token="",  # Empty for Telegram Stars (XTR) — no third-party provider needed
         currency="XTR",
         prices=[LabeledPrice(label="Plus (30 дней)", amount=385)],
     )
@@ -114,14 +118,8 @@ async def successful_payment(message: Message, db_client: Any | None = None) -> 
         plan_slug = payload.replace("plan:", "") if payload.startswith("plan:") else None
 
         if plan_slug and db_client is not None:
-            try:
-                await db_client.activate_subscription(user_id, plan_slug)
-                await message.answer("Подписка активирована! Спасибо 💕")
-            except Exception as e:
-                logger.error("Failed to activate subscription for user {}: {}", user_id, e)
-                await message.answer(
-                    "Оплата получена, но произошла ошибка. Напиши /start и попробуй снова."
-                )
+            await _process_payment(user_id, payment, db_client, plan_slug)
+            await message.answer("Подписка активирована! Спасибо 💕")
         elif plan_slug and db_client is None:
             logger.error("Payment received but DB unavailable for user {}", user_id)
             await message.answer(
@@ -134,6 +132,33 @@ async def successful_payment(message: Message, db_client: Any | None = None) -> 
         await message.answer(
             "Прости, при обработке платежа что-то пошло не так. Напиши /start и попробуй снова."
         )
+
+
+async def _process_payment(user_id: int, payment: Any, db_client: Any, plan_slug: str) -> None:
+    """Process payment: record first, then activate. Idempotent — skips if duplicate."""
+    charge_id = payment.telegram_payment_charge_id
+
+    # Record payment BEFORE activation — ensures payment record exists for reconciliation.
+    # Returns False if duplicate (ON CONFLICT DO NOTHING) or error.
+    is_new = await db_client.record_payment(
+        telegram_user_id=user_id,
+        amount_cents=payment.total_amount,
+        provider_payment_id=charge_id,
+    )
+
+    if not is_new:
+        logger.warning("Duplicate payment skipped: user={} charge_id={}", user_id, charge_id)
+        return
+
+    await db_client.activate_subscription(user_id, plan_slug)
+
+    logger.info(
+        "Payment succeeded: user={} plan={} amount={} charge_id={}",
+        user_id,
+        plan_slug,
+        payment.total_amount,
+        charge_id,
+    )
 
 
 @router.message(Command("stats"))
@@ -165,28 +190,38 @@ async def stats(message: Message, pipeline: ChatPipeline) -> None:
         await message.answer("Не удалось загрузить статистику. Попробуй позже.")
 
 
+# Catch-all handler — MUST be registered last
 @router.message()
 async def chat(message: Message, pipeline: ChatPipeline) -> None:
     """Handle regular chat messages — delegates to ChatPipeline."""
     user_id = message.from_user.id if message.from_user else 0
     user_name = getattr(message.from_user, "first_name", None) if message.from_user else None
-    content = message.text or ""
 
-    if not content:
-        content = _extract_message_content(message)
+    try:
+        text, images = await _extract_message_content(message)
+    except ValueError as exc:
+        await message.answer(str(exc))
+        return
+    except RuntimeError as exc:
+        await message.answer(str(exc))
+        return
 
     try:
         result = await pipeline.handle_message(
-            user_id=user_id, content=content, user_name=user_name
+            user_id=user_id,
+            content=text,
+            images=images,
+            user_name=user_name,
         )
 
         # Deliver response via Telegram
-        if result.image_bytes is not None:
+        if result.image_bytes:
             if result.response_text and result.response_text.strip():
                 await message.answer(result.response_text)
-            await message.answer_photo(
-                photo=BufferedInputFile(result.image_bytes, filename="photo.png"),
-            )
+            for img in result.image_bytes:
+                await message.answer_photo(
+                    photo=BufferedInputFile(img, filename="photo.png"),
+                )
         elif result.response_text and result.response_text.strip():
             await message.answer(result.response_text)
 
@@ -198,27 +233,78 @@ async def chat(message: Message, pipeline: ChatPipeline) -> None:
         await message.answer("Я тебя услышала, но что-то пошло не так. Попробуй ещё раз.")
 
 
-def _extract_message_content(message: Message) -> str:
-    """Extract content from non-text messages."""
-    parts = []
-    if message.caption:
-        parts.append(f"[Caption: {message.caption}]")
+async def _extract_message_content(message: Message) -> tuple[str, list[str] | None]:
+    """Extract content and optional image data URLs from a Telegram message.
+
+    Returns:
+        (text, images) where images is a list of base64 data URLs or None.
+
+    Raises:
+        ValueError: if the photo exceeds the configured size limit.
+        RuntimeError: if the photo download fails.
+    """
     if message.photo:
-        parts.append("[Photo attached]")
-    if message.document:
-        parts.append(f"[Document: {message.document.file_name or 'unnamed'}]")
-    if message.voice:
-        parts.append("[Voice message]")
-    if message.video:
-        parts.append("[Video attached]")
-    if message.audio:
-        parts.append("[Audio attached]")
+        photo = message.photo[-1]  # largest available size
+
+        max_bytes = int(settings.max_image_size_mb * 1024 * 1024)
+        if photo.file_size and photo.file_size > max_bytes:
+            raise ValueError("Ой, фотка слишком большая! Попробуй отправить поменьше 📸")
+
+        try:
+            bot = message.bot
+            if bot is None:
+                raise RuntimeError("Не смогла загрузить фотку, попробуй ещё раз!")
+            file = await bot.get_file(photo.file_id)
+            buf = BytesIO()
+            await bot.download_file(file.file_path, buf)  # type: ignore[arg-type]
+        except (ValueError, RuntimeError):
+            raise
+        except Exception as exc:
+            raise RuntimeError("Не смогла загрузить фотку, попробуй ещё раз!") from exc
+
+        mime_type = "image/jpeg"  # Telegram photos are always JPEG
+        if file.file_path:
+            guessed = mimetypes.guess_type(file.file_path)[0]
+            if guessed:
+                mime_type = guessed
+
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        buf.close()
+        data_url = f"data:{mime_type};base64,{b64}"
+        text = message.caption or "Что на этом фото?"
+        return text, [data_url]
+
+    # Non-photo media: preserve message.caption if present
+    caption = message.caption or ""
+
     if message.sticker:
-        parts.append(f"[Sticker: {message.sticker.emoji or 'emoji'}]")
+        emoji = message.sticker.emoji or "emoji"
+        return f"[Стикер: {emoji}]", None
+
+    if message.voice:
+        label = "[Голосовое сообщение]"
+        return f"{caption} {label}".strip() if caption else label, None
+
+    if message.video:
+        label = "[Видео]"
+        return f"{caption} {label}".strip() if caption else label, None
+
+    if message.audio:
+        label = "[Аудио]"
+        return f"{caption} {label}".strip() if caption else label, None
+
+    if message.document:
+        name = message.document.file_name or "unnamed"
+        label = f"[Документ: {name}]"
+        return f"{caption} {label}".strip() if caption else label, None
+
     if message.location:
-        parts.append(f"[Location: {message.location.latitude}, {message.location.longitude}]")
+        lat = message.location.latitude
+        lon = message.location.longitude
+        return f"[Местоположение: {lat}, {lon}]", None
+
     if message.contact:
-        parts.append(f"[Contact: {message.contact.first_name or 'unnamed'}]")
-    if not parts:
-        parts.append("[Non-text message]")
-    return " ".join(parts)
+        name = message.contact.first_name or "unnamed"
+        return f"[Контакт: {name}]", None
+
+    return message.text or "", None

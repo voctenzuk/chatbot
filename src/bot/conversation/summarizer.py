@@ -16,6 +16,7 @@ from typing import Any, Protocol, Self
 
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
+from langchain_openai import ChatOpenAI
 from loguru import logger
 from pydantic import SecretStr
 
@@ -47,17 +48,16 @@ class SimpleLLMProvider:
         self._raw_key = api_key or settings.llm_api_key
         self._model_name = model
         self._base_url = base_url or settings.llm_base_url
-        self._model: Any | None = None
+        self._model: ChatOpenAI | None = None
 
-    def _get_model(self) -> Any:
+    def _get_model(self) -> ChatOpenAI:
         """Build the underlying chat model lazily."""
         if self._model is None:
-            from langchain_openai import ChatOpenAI
-
             self._model = ChatOpenAI(
                 model=self._model_name,
                 api_key=SecretStr(self._raw_key) if self._raw_key else None,
                 base_url=self._base_url,
+                max_retries=5,
             )
         return self._model
 

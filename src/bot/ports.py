@@ -2,7 +2,7 @@
 
 Only services where implementation swapping is realistic get a Protocol:
 - LLMPort: swap LLM provider (OpenAI, Anthropic, local Ollama)
-- MemoryPort: swap memory backend (Cognee, in-memory, future alternatives)
+- MemoryPort: swap memory backend (mem0, in-memory, future alternatives)
 - MessageDeliveryPort: swap delivery channel (Telegram, Web, CLI)
 """
 

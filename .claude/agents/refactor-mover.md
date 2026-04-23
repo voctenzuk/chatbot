@@ -76,6 +76,15 @@ List:
 - Always preserve `__all__` exports if defined
 - Keep `from __future__ import annotations` as first import in all files
 
+## Completion Protocol
+
+When done, report status as the LAST line of your response:
+
+- `STATUS: DONE` — moved, shims created, imports updated, validation passed
+- `STATUS: DONE_WITH_CONCERNS — <description>` — done but with observations (circular deps, large shim surface)
+- `STATUS: NEEDS_CONTEXT — <what you need>` — missing info to proceed
+- `STATUS: BLOCKED — <reason>` — cannot proceed (circular imports, too many dependents)
+
 ## Package naming conventions
 
 | Domain | Package path | What goes here |

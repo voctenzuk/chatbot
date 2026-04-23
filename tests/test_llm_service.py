@@ -31,6 +31,7 @@ class TestLLMServiceInit:
             mock_settings.llm_api_key = "sk-test"
             mock_settings.llm_temperature = 0.5
             mock_settings.llm_max_tokens = 512
+            mock_settings.vision_model = None  # no vision model
 
             with patch("bot.llm.service.ChatOpenAI") as mock_chat:
                 _svc = LLMService()
@@ -43,13 +44,58 @@ class TestLLMServiceInit:
                 api_key=SecretStr("sk-test"),
                 temperature=0.5,
                 max_completion_tokens=512,
+                max_retries=5,
             )
+
+    def test_llm_service_uses_openrouter_when_available(self):
+        """LLMService uses ChatOpenRouter when package is available and URL matches."""
+        with (
+            patch("bot.llm.service.settings") as mock_settings,
+            patch("bot.llm.service._openrouter_available", True),
+            patch("bot.llm.service.ChatOpenRouter") as mock_or,
+        ):
+            mock_settings.llm_model = "test-model"
+            mock_settings.llm_base_url = "https://openrouter.ai/api/v1"
+            mock_settings.llm_api_key = "sk-or-test"
+            mock_settings.llm_temperature = 0.7
+            mock_settings.llm_max_tokens = 1024
+            mock_settings.vision_model = None  # no vision model
+
+            _svc = LLMService()
+
+            from pydantic import SecretStr
+
+            mock_or.assert_called_once_with(
+                model_name="test-model",
+                openrouter_api_key=SecretStr("sk-or-test"),
+                temperature=0.7,
+                max_completion_tokens=1024,
+                max_retries=5,
+            )
+
+    def test_llm_service_falls_back_to_openai(self):
+        """LLMService falls back to ChatOpenAI when openrouter package unavailable."""
+        with (
+            patch("bot.llm.service.settings") as mock_settings,
+            patch("bot.llm.service._openrouter_available", False),
+            patch("bot.llm.service.ChatOpenAI") as mock_chat,
+        ):
+            mock_settings.llm_model = "test-model"
+            mock_settings.llm_base_url = "https://openrouter.ai/api/v1"
+            mock_settings.llm_api_key = "sk-test"
+            mock_settings.llm_temperature = 0.5
+            mock_settings.llm_max_tokens = 512
+            mock_settings.vision_model = None  # no vision model
+
+            _svc = LLMService()
+
+            mock_chat.assert_called_once()
 
     def test_llm_service_init_explicit(self):
         """Explicit model param overrides config-based creation."""
         mock_model = MagicMock()
         svc = LLMService(model=mock_model)
-        assert svc._model is mock_model
+        assert svc._default_model is mock_model
 
 
 class TestLLMServiceGenerate:
