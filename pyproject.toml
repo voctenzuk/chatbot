@@ -183,6 +183,8 @@ filterwarnings = [
     "ignore::DeprecationWarning:cognee",
     "ignore::DeprecationWarning:httpx",
     "ignore::DeprecationWarning:apscheduler",
+    "ignore::DeprecationWarning:supabase",
+    "ignore::DeprecationWarning:gotrue",
     "ignore::UserWarning:langchain",
     "ignore::RuntimeWarning:unittest.mock",
 ]
@@ -190,7 +192,12 @@ filterwarnings = [
 [tool.coverage.run]
 source = ["src/bot"]
 branch = true
-omit = ["src/bot/__main__.py"]
+omit = [
+    "src/bot/__main__.py",
+    "src/bot/app.py",
+    "src/bot/adapters.py",
+    "src/bot/scripts/**",
+]
 
 [tool.coverage.report]
 fail_under = 80

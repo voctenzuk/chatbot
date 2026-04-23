@@ -26,7 +26,6 @@ Architecture:
 """
 
 import importlib.util
-import random
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -240,9 +239,9 @@ class ProactiveScheduler:
                 if profile is not None:
                     fact_hints: list[str] = []
                     if profile.interests:
-                        fact_hints.append(random.choice(profile.interests))
+                        fact_hints.append(profile.interests[0])
                     if profile.likes:
-                        fact_hints.append(random.choice(profile.likes))
+                        fact_hints.append(profile.likes[0])
                     if fact_hints:
                         enriched_hint += (
                             f"\nВспомни что собеседнику интересно: {', '.join(fact_hints)}"
