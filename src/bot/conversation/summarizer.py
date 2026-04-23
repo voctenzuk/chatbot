@@ -16,7 +16,6 @@ from typing import Any, Protocol, Self
 
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
-from langchain_openai import ChatOpenAI
 from loguru import logger
 from pydantic import SecretStr
 
@@ -45,18 +44,28 @@ class SimpleLLMProvider:
         model: str = "gpt-4o-mini",
         base_url: str | None = None,
     ) -> None:
-        raw_key = api_key or settings.llm_api_key
-        self._model = ChatOpenAI(
-            model=model,
-            api_key=SecretStr(raw_key) if raw_key else None,
-            base_url=base_url or settings.llm_base_url,
-        )
+        self._raw_key = api_key or settings.llm_api_key
+        self._model_name = model
+        self._base_url = base_url or settings.llm_base_url
+        self._model: Any | None = None
+
+    def _get_model(self) -> Any:
+        """Build the underlying chat model lazily."""
+        if self._model is None:
+            from langchain_openai import ChatOpenAI
+
+            self._model = ChatOpenAI(
+                model=self._model_name,
+                api_key=SecretStr(self._raw_key) if self._raw_key else None,
+                base_url=self._base_url,
+            )
+        return self._model
 
     async def generate(
         self, prompt: str, temperature: float = 0.7, config: dict[str, Any] | None = None
     ) -> str:
         """Generate text using LangChain ChatOpenAI."""
-        model = self._model.bind(temperature=temperature)
+        model = self._get_model().bind(temperature=temperature)
         effective_config = RunnableConfig(**config) if config else None
         result = await model.ainvoke([HumanMessage(content=prompt)], config=effective_config)
         return str(result.content)
